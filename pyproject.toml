@@ -14,7 +14,7 @@ license = { file = "licenses/LICENSE.rst" }
 authors = [
   { name = "Gabriel Pfaffman", email = "gabriel.pfaffman@mail.utoronto.ca" },
 ]
-dependencies = []
+dependencies = ["numpy", "pytorch", "galpy"]
 dynamic = ["version"]
 
 [project.scripts]
