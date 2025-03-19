@@ -46,7 +46,7 @@ def generate_orbits_aa(n_actions, n_angles, action_min, action_max):
     new_batch[:,:,1] = angles_to_add
     return new_batch
 
-def generate_orbits(num_orbits, potential, t_end, n_steps, t_start=0, pot_type='1D', r_bounds=torch.tensor([0.1, 0.75]), plot=False, color_by ='H', saveData=False, filename='test_data.pt'):
+def generate_orbits(num_orbits, potential, t_end, n_steps, t_start=0, pot_type='1D', r_bounds=torch.tensor([0.1, 0.75]), plot=False, color_by ='H', saveData=False, output_dir = None, filename='test_data.pt'):
     # Simple synthetic transformation (this is where you'd put your known transformation)
     #r_bounds = torch.sqrt(2 * E_bounds / omega**2)
     tl = np.linspace(t_start, t_end, n_steps)
@@ -67,8 +67,8 @@ def generate_orbits(num_orbits, potential, t_end, n_steps, t_start=0, pot_type='
             plot_aa(num_orbits, aa, t_end, n_steps, color=H, color_kwargs={'ps':z, 'potential_for_H':potential})
             
     if saveData == True:
-        data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../training_data"))
-        model_dir = os.path.join(data_dir, filename)
+    
+        model_dir = os.path.join(output_dir, filename)
         os.makedirs(model_dir, exist_ok=True)
         data_path = f'{model_dir}/{filename}.pt'
         torch.save({'phase space':z, 'action angle':aa}, data_path)
@@ -110,6 +110,7 @@ def generate_sho_orbits(
         split_orbits=False,
         plot=False, 
         color_by ='H', 
+        output_dir=None,
         saveData=False, 
         filename='sho_test_data.pt'):
     '''
@@ -171,8 +172,7 @@ def generate_sho_orbits(
         z = z.reshape(num_orbits, n_steps, 2)
         aa = aa.reshape(num_orbits, n_steps, 2)
     if saveData == True:
-        data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../training_data"))
-        model_dir = os.path.join(data_dir, filename)
+        model_dir = os.path.join(output_dir, filename)
         os.makedirs(model_dir, exist_ok=True)
         data_path = f'{model_dir}/{filename}.pt'
         torch.save({'phase space':z, 'action angle':aa}, data_path)

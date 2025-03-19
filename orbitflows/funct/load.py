@@ -3,7 +3,7 @@ import json
 import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__),'..')))
-from .. import GsympNetFlow
+from ..flow import GsympNetFlow
 import numpy as np
 
 class DataLoader():

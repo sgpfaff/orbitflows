@@ -1,0 +1,24 @@
+{
+    "num_orbits": 5,
+    "potential": "IsothermalDiskPotential",
+    "potential_values": {
+        "_amp": 1.0,
+        "dim": 1,
+        "isRZ": false,
+        "hasC": true,
+        "hasC_dxdv": false,
+        "hasC_dens": false,
+        "_ro": 8.0,
+        "_roSet": false,
+        "_vo": 220.0,
+        "_voSet": false,
+        "_sigma2": 0.010000000000000002,
+        "_H": 0.019947114020071637
+    },
+    "integration_start_time": 0,
+    "integration_end_time": 100,
+    "num_steps": 1000,
+    "r_lower_bound": 0.10000000149011612,
+    "r_upper_bound": 0.75,
+    "filename": "iso_disk_5_orbs"
+}

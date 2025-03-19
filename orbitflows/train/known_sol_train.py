@@ -21,7 +21,7 @@ import os
 import json
 
 # Get absolute path for the outputs directory
-output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../trained_models"))
+#output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../trained_models"))
 
 
 
@@ -41,6 +41,7 @@ def regular_train(
         lr=1e-3,
         duration=10,
         saveModel=False,
+        output_dir = None, 
         training_data_name=None,
         gpu=None,
         ham_funct=H,
@@ -232,6 +233,7 @@ def polar_train(
         lr=1e-3,
         duration=10,
         saveModel=False,
+        output_dir=None,
         training_data_name=None,
         ham_funct=H,
         *args,
@@ -290,7 +292,7 @@ def polar_train(
 
     # Create a DataLoader for batching
     dataset = TensorDataset(x, aa)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True).to(device)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     # For storing the Jacobian log-determinant at each step (if ded)
     jac_list = np.zeros(training_steps)
