@@ -19,8 +19,8 @@ def H(ps, potential_for_H):
     -------
     float: Hamiltonian value at the given phase-space point
     '''
-    x, v = ps.T
-    return 0.5*v**2 + potential_for_H(x)
+    q, p = ps[..., 0], ps[..., 1]
+    return 0.5*p**2 + potential_for_H(q)
 
 def H_sho(ps, omega=1):
     '''
@@ -33,5 +33,5 @@ def H_sho(ps, omega=1):
     Returns:
     float: Hamiltonian value at the given phase-space point
     '''
-    x, v = ps.T
-    return 0.5*v**2 + 0.5*(omega*x)**2
+    q, p = ps[...,0], ps[...,1]
+    return 0.5*p**2 + 0.5*(omega*q)**2

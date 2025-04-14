@@ -29,7 +29,7 @@ def generate_orbit_ps(num_orbits, potential, t_end, n_steps, t_start=0, r_bounds
     z = torch.cat((torch.from_numpy(q)[:,None], torch.from_numpy(p)[:,None]), dim=-1)
     if plot == True:
         plot_ps(num_orbits, z, t_end, n_steps, color=H, color_kwargs={'ps':z, 'potential_for_H':potential})
-    return z
+    return z.reshape((num_orbits, n_steps, 2))
 
 def generate_orbits_aa(n_actions, n_angles, action_min, action_max):
     '''
@@ -98,7 +98,7 @@ def generate_orbits(num_orbits, potential, t_end, n_steps, t_start=0, pot_type='
             json.dump(config, config_file, indent=4)
 
         print(f"Configuration saved to {config_path}")
-    return z, aa
+    return z.reshape((num_orbits, n_steps, 2)), aa.reshape((num_orbits, n_steps, 2))
 
 def generate_sho_orbits(
         num_orbits, 
@@ -196,7 +196,7 @@ def generate_sho_orbits(
         with open(config_path, 'w') as config_file:
             json.dump(config, config_file, indent=4)
         print(f"Configuration saved to {config_path}")
-    return z, aa
+    return z.reshape((num_orbits, n_steps, 2)), aa.reshape((num_orbits, n_steps, 2))
 
 def guess_aa_pair(z, transform_type='SHO', omega_guess=1):
     # I should add some sort of kwargs thing here instead of omega, so that they can identify a custom guess potential/action angle transformation
