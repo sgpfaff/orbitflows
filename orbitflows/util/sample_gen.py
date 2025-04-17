@@ -3,7 +3,7 @@ Generate training data and orbit samples
 '''
 
 import torch
-from .orbit_props import H, H_sho
+from .hamiltonians import H, H_sho
 from .plot import plot_ps, plot_aa
 
 # galpy

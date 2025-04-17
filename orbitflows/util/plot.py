@@ -5,7 +5,7 @@ Plotting functions
 
 import numpy as np
 import matplotlib.pyplot as plt
-from .orbit_props import H
+from .hamiltonians import H
 import os
 
 def plot_aa(n_orbits, aa, t_end, n_steps, t_start=0, color=H, color_kwargs={}, plot_kwargs={'s':5, 'cmap':'inferno'}):

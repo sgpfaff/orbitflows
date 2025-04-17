@@ -1,5 +1,5 @@
 '''
-Calculate properties of orbits
+Hamiltonian functions of various potentials, as a function of given phase-space points .
 '''
 
 import numpy as np

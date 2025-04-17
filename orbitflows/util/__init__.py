@@ -1,4 +1,4 @@
-from .orbit_props import *
+from .hamiltonians import *
 from .polar_cartesian import *
 from .sample_gen import *
 from .load import *

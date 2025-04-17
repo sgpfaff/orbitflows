@@ -1,3 +1,5 @@
+'''Analytic transformations between action-angle and phase space coordinates.'''
+
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -85,7 +87,7 @@ class actionAngleHarmonic():
         else:  # pragma: no cover
             raise ValueError("actionAngleHarmonic __call__ input not understood")
 
-    def _actionsFreqsAngles(self, *args, **kwargs):
+    def actionsFreqsAngles(self, *args, **kwargs):
         """
         Evaluate the action, frequency, and angle for the harmonic oscillator
 

@@ -27,8 +27,15 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def hamiltonian(self, j, theta):
+    def hamiltonian(self, aa):
         pass
+
+    def frequency(self, aa):
+        '''Compute the frequency of the system.'''
+        theta, j = aa[..., 0], aa[..., 1]
+        #theta.requires_grad = True
+        aa = torch.stack((theta, j), dim=-1)
+        return torch.autograd.grad(self.hamiltonian(aa), j, allow_unused=True)[0]
 
     @abstractmethod
     def aa_to_ps(self, aa):

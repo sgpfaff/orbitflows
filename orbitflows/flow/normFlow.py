@@ -1,4 +1,4 @@
-'''Defines the structure of the flow.'''
+'''Defines the structure of the normalizing flow.'''
 
 # pytorch
 import torch
