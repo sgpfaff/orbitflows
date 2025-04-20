@@ -137,6 +137,5 @@ class HamiltonianMappingModel(Model):
         '''
         return H(self.aa_to_ps(aa), self.targetPotential)
 
-
     def save(self, filename, output_dir=''):
         pass
