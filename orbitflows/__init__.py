@@ -1,4 +1,4 @@
-from .util import *
+from .utils import *
 from .train import *
 from .flow import *
 from .flow.normFlow import *

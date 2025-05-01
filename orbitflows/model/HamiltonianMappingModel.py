@@ -1,13 +1,10 @@
-'''Model with an intermediate toy hamiltonian.'''
+'''Model with an intermediate toy hamiltonian, mapped in phase-space.'''
 
-import torch
-from tqdm import tqdm
-from .base import Model
-from ..util import actionAngleHarmonic, actionAngleHarmonicInverse, H
-from ..train import scaled_H_std
+from .MappingModel import MappingModel
 
-class HamiltonianMappingModel(Model):
-    def __init__(self, input_dim : int, hidden_dim : int, num_layers : int, omega=None, isochroneParams=None):
+
+class HamiltonianMappingModel(MappingModel):
+    def __init__(self, targetPotential : callable, input_dim : int, hidden_dim : int, num_layers : int, omega=1.0):
         '''
         Initialize the normalizing flow model with a toy hamiltonian.
 
@@ -16,126 +13,65 @@ class HamiltonianMappingModel(Model):
 
         Parameters
         ----------
+        targetPotential : callable
+            The potential that represents the physical system of interest.
+            Should be a callable that takes
+            phase-space coordinates as input and returns the potential.
 
         input_dim : int
-            The dimensions of the input data.
+            The dimensions of the input data. Should be the same dimension of the phase space
+            you wish to transform.
 
         hidden_dim : int
             The dimensions of the hidden layers.
 
         num_layers : int
-            The number of layers in the model.
+            The number of layers in the normalizing flow.
 
         omega : float, optional
             The frequency of the harmonic oscillator for the toy hamiltonian.
             If None, defaults to 1.0.
 
-        isochroneParams : list, optional
-            The parameters for the isochrone potential.
-
         Notes
         -----
-        - only use omega for systems with one dimension and
+        - TO ADD: only use omega for systems with one dimension and 
         isochroneParams for systems with more than one dimension.
         '''
 
-        Model.__init__(self, input_dim, hidden_dim, num_layers)
-
-        if self.input_dim == 2:
-            if isochroneParams is not None:
-                raise ValueError("Isochrone parameters are not supported for 1D systems. Please define omega instead.")
-            elif omega is not None:
-                self.omega = omega
-            else:
-                self.omega = 1.0
-            def _toy_ps_to_aa(ps):
-                q, p = ps[..., 0], ps[..., 1]
-                j, _, theta = actionAngleHarmonic(omega=self.omega).actionsFreqsAngles(q, p)
-                return torch.stack((theta, j), dim=-1)
-            def _aa_to_toy_ps(aa):
-                theta, j = aa[..., 0], aa[..., 1]
-                q, p = actionAngleHarmonicInverse(omega=self.omega)(j, theta)
-                return torch.stack((q, p), dim=-1)
-            
-        
-        self.toy_ps_to_aa = _toy_ps_to_aa
-        self.aa_to_toy_ps = _aa_to_toy_ps
-        self.targetPotential = None
-        self.loss_list = []
-            
-    def train(self, targetPotential, training_data, steps, loss_function=scaled_H_std, learning_rate=1e-4):
-        '''
-        Train the model.
-        
-        Parameters
-        ----------
-
-        training_data : torch.Tensor
-            The training data to use for the model. Should be of shape (n_orbits, n_steps, 2).
-
-        steps : int
-            The number of steps to train the model.
-
-        stepsize : float
-            The step size for the training.
-
-        loss_function : callable
-            The loss function to use for the training.
-        '''
-        
-        self.targetPotential = targetPotential
-        
-        optimizer = self.optimizer(self.flow.parameters(), lr=learning_rate)
-        for epoch in tqdm(range(steps)):
-            ps_NF = self.flow(training_data)
-            loss = loss_function(ps_NF, targetPotential)
-            
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-                
-            self.loss_list.append(loss.item())
+        MappingModel.__init__(self, targetPotential, input_dim, hidden_dim, num_layers, omega)  
 
     def aa_to_ps(self, aa):
         '''
-        Compute the phase-space coordinates from the action-angle variables,
-        using the normalizing flow approximation.
+        Transform aciton angle to phase-space coordinates using the 
+        normalizing flow and the toy potential.
 
         Parameters
         ----------
         aa : torch.Tensor
-            The action-angle variables.
+            The action angle coordinates to transform.
 
         Returns
         -------
         torch.Tensor
-            The phase-space coordinates.
+            The approximate phase-space coordinates cooresponding to the input.
         '''
         ps_int = self.aa_to_toy_ps(aa) # intermediate solution
         return self.flow(ps_int)
     
     def ps_to_aa(self, ps):
-        ps_sho = self.flow.inverse(ps)
-        return self.toy_ps_to_aa(ps_sho)
-    
-    def hamiltonian(self, aa):
         '''
-        Compute the Hamiltonian for the given action-angle variables, using the
-        normalizing flow approximation.
+        Transform phase-space to action angle coordinates using the 
+        normalizing flow and the toy potential.
 
         Parameters
         ----------
-        aa : torch.Tensor
-            The action-angle variables.
-            Should be of shape (n_orbits, n_steps, 2).
-            The first dimension is the angle and the second dimension is the action.
+        ps : torch.Tensor
+            The phase-space coordinates to transform.
 
         Returns
         -------
         torch.Tensor
-            The Hamiltonian value along each orbit.
+            The approximate action angle coordinates cooresponding to the input.
         '''
-        return H(self.aa_to_ps(aa), self.targetPotential)
-
-    def save(self, filename, output_dir=''):
-        pass
+        ps_sho = self.flow.inverse(ps)
+        return self.toy_ps_to_aa(ps_sho)

@@ -71,7 +71,6 @@ def rungekutta4(ps, delta_t, _hamiltonian_err):
         Should take a phase-space point as input and return a scalar.
         Called internally in Model integration method.
     '''
-
     def _kfull_x(ps, wrt, kn_q, kn_p):
         '''
         Compute runge-kutta full step k for a given variable. 

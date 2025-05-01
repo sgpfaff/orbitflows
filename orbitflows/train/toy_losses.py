@@ -1,7 +1,7 @@
 '''Loss functions for training with a toy guess.'''
 
 import torch
-from ..util import H
+from ..utils import H
 
 def scaled_H_std(ps, targetPotential):
     orbit_energies = H(ps, targetPotential)

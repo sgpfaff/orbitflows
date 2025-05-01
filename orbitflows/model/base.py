@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from ..flow import GsympNetFlow
-from ..util import H
+from ..utils import H
 import torch
 from tqdm import tqdm
 from ..integrate import eulerstep, hamiltonian_fixed_angle
@@ -26,13 +26,38 @@ class Model(ABC):
             }
 
     @abstractmethod
+    def aa_to_ps(self, aa):
+        pass
+
+    @abstractmethod
+    def ps_to_aa(self, ps):
+        pass
+
+    @abstractmethod
     def train(self, training_data, steps, loss_function):
         '''Train the model.'''
         pass
 
-    @abstractmethod
+
     def hamiltonian(self, aa):
-        pass
+        '''
+        Compute the Hamiltonian for the given action-angle variables, using the
+        normalizing flow approximation.
+
+        Parameters
+        ----------
+        aa : torch.Tensor
+            The action-angle variables.
+            Should be of shape (n_orbits, n_steps, 2).
+            The first dimension is the angle and the second dimension is the action.
+
+        Returns
+        -------
+        torch.Tensor
+            The Hamiltonian value along each orbit.
+        '''
+        return H(self.aa_to_ps(aa), self.targetPotential)
+        
 
     def frequency(self, aa):
         '''Compute the frequency of the system.'''
@@ -41,13 +66,7 @@ class Model(ABC):
         aa = torch.stack((theta, j), dim=-1)
         return torch.autograd.grad(self.hamiltonian(aa), j, allow_unused=True)[0]
 
-    @abstractmethod
-    def aa_to_ps(self, aa):
-        pass
-
-    @abstractmethod
-    def ps_to_aa(self, ps):
-        pass
+ 
 
 
     def integrate(self, aa, steps, t_end, correction=eulerstep, hamiltonian_tilde=hamiltonian_fixed_angle):

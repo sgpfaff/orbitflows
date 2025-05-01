@@ -4,7 +4,6 @@ Generate training data and orbit samples
 
 import torch
 from .hamiltonians import H, H_sho
-from .plot import plot_ps, plot_aa
 
 # galpy
 from galpy.actionAngle import actionAngleVertical
@@ -27,8 +26,6 @@ def generate_orbit_ps(num_orbits, potential, t_end, n_steps, t_start=0, r_bounds
     q = oi.x(tl).flatten()   # Example q values
     p = oi.vx(tl).flatten()   # Example p values
     z = torch.cat((torch.from_numpy(q)[:,None], torch.from_numpy(p)[:,None]), dim=-1)
-    if plot == True:
-        plot_ps(num_orbits, z, t_end, n_steps, color=H, color_kwargs={'ps':z, 'potential_for_H':potential})
     return z.reshape((num_orbits, n_steps, 2))
 
 def generate_orbits_aa(n_actions, n_angles, action_min, action_max):
@@ -46,7 +43,7 @@ def generate_orbits_aa(n_actions, n_angles, action_min, action_max):
     new_batch[:,:,1] = angles_to_add
     return new_batch
 
-def generate_orbits(num_orbits, potential, t_end, n_steps, t_start=0, pot_type='1D', r_bounds=torch.tensor([0.1, 0.75]), plot=False, color_by ='H', saveData=False, output_dir = None, filename='test_data.pt'):
+def generate_orbits(num_orbits, potential, t_end, n_steps, t_start=0, pot_type='1D', r_bounds=torch.tensor([0.1, 0.75]), saveData=False, output_dir = None, filename='test_data.pt'):
     # Simple synthetic transformation (this is where you'd put your known transformation)
     #r_bounds = torch.sqrt(2 * E_bounds / omega**2)
     tl = np.linspace(t_start, t_end, n_steps)
@@ -62,9 +59,6 @@ def generate_orbits(num_orbits, potential, t_end, n_steps, t_start=0, pot_type='
         z = torch.cat((torch.from_numpy(q)[:,None], torch.from_numpy(p)[:,None]), dim=-1)
         J, _, phi = aAV.actionsFreqsAngles(q, p)
         aa = torch.cat((torch.from_numpy(phi)[:,None], torch.from_numpy(J)[:,None]), dim=-1).to(torch.float32)
-        if plot == True:
-            plot_ps(num_orbits, z, t_end, n_steps, color=H, color_kwargs={'ps':z, 'potential_for_H':potential})
-            plot_aa(num_orbits, aa, t_end, n_steps, color=H, color_kwargs={'ps':z, 'potential_for_H':potential})
             
     if saveData == True:
     
@@ -108,8 +102,6 @@ def generate_sho_orbits(
         t_start=0, 
         r_bounds=torch.tensor([0.1, 0.75]),
         split_orbits=False,
-        plot=False, 
-        color_by ='H', 
         output_dir=None,
         saveData=False, 
         filename='sho_test_data.pt'):
@@ -132,10 +124,6 @@ def generate_sho_orbits(
         bounds of the radius of the SHO orbits
     split_orbits : bool
         whether to split the output into individual orbits
-    plot : bool
-        whether to plot the generated orbits
-    color_by : str
-        function to color by (defaults to Hamiltonian)
     saveData : bool
         whether to save the generated data
     filename : str
@@ -165,9 +153,6 @@ def generate_sho_orbits(
     for i, a in enumerate(aa[:,0]):
             if a < 0:
                 aa[:,0][i] = a + 2*np.pi
-    if plot == True:
-        plot_ps(num_orbits, z, t_end, n_steps, color=H_sho, color_kwargs={'ps':z, 'omega':omega})
-        plot_aa(num_orbits, aa, t_end, n_steps, color=H_sho, color_kwargs={'ps':z, 'omega':omega})
     if split_orbits == True:
         z = z.reshape(num_orbits, n_steps, 2)
         aa = aa.reshape(num_orbits, n_steps, 2)
