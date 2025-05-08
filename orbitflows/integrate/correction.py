@@ -89,8 +89,7 @@ def rungekutta4(ps, delta_t, _hamiltonian_err):
         p0 = ps[..., 1]
         return delta_t * dH_dx(torch.stack([q0 + kn_q/2, p0 + kn_p/2], dim=-1), wrt, _hamiltonian_err)
     
-    q0 = ps[..., 0]
-    p0 = ps[..., 1]
+   
     
     k1_q, k1_p = _kfull_x(ps, 'p', 0, 0), _kfull_x(ps, 'q', 0, 0)
 
@@ -99,6 +98,9 @@ def rungekutta4(ps, delta_t, _hamiltonian_err):
     k3_q, k3_p = _khalf_x(ps, 'p', k2_q, k2_p), _khalf_x(ps, 'q', k2_q, k2_p)
 
     k4_q, k4_p = _kfull_x(ps, 'p', k3_q, k3_p), _kfull_x(ps, 'q', k3_q, k3_p)
+
+    q0 = ps[..., 0]
+    p0 = ps[..., 1]
 
     q = q0 + (1/6)*(k1_q + 2*k2_q + 2*k3_q + k4_q)
     p = p0 + (1/6)*(k1_p + 2*k2_p + 2*k3_p + k4_p)

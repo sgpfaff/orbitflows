@@ -69,7 +69,7 @@ class Model(ABC):
  
 
 
-    def integrate(self, aa, steps, t_end, correction=eulerstep, hamiltonian_tilde=hamiltonian_fixed_angle):
+    def integrate(self, aa, steps, t_end, correction_step_size=None, correction=eulerstep, hamiltonian_tilde=hamiltonian_fixed_angle):
         '''Routine to integrate orbits in AA space and update frequencies regularly, with euler step correction
     
         Parameters
@@ -140,6 +140,9 @@ class Model(ABC):
         theta_list = torch.zeros(steps)
         j_list = torch.zeros(steps)
         
+        if correction_step_size is None:
+            correction_step_size = delta_t
+        
         theta0 = aa[...,0]
         j0 = aa[...,1]
         freq = _freq_tilde(aa)
@@ -147,6 +150,7 @@ class Model(ABC):
 
         for i, t in enumerate(tqdm(torch.linspace(0, t_end, steps))):
             # evolve in action-angle space
+            # drift
             theta_half = theta0 + freq*delta_t/2 # drift 
 
             # transform to phase space
@@ -155,7 +159,7 @@ class Model(ABC):
 
             # compute Hamiltonian error
 
-            ps_half_corrected = correction(ps_half, delta_t, _hamiltonian_error)
+            ps_half_corrected = correction(ps_half, correction_step_size, _hamiltonian_error)
 
             # convert back to action-angle space
             aa_half_corrected = self.ps_to_aa(ps_half_corrected)
