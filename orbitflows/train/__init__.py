@@ -1,1 +1,1 @@
-from .known_sol_train import *
+from .toy_losses import scaled_H_std
