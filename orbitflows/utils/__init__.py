@@ -1,5 +1,5 @@
 from .hamiltonians import *
-from .polar_cartesian import *
+from ._polarcartesian import *
 from .sample import *
-from .load import *
+from ._load import *
 from .actionAngle import *
