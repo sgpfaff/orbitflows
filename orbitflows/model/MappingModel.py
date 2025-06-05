@@ -33,7 +33,7 @@ class MappingModel(Model):
         num_layers : int
             The number of layers in the normalizing flow.
         '''
-        Model.__init__(self, input_dim, hidden_dim, num_layers)
+        Model.__init__(self, targetPotential, input_dim, hidden_dim, num_layers)
         
         if self.input_dim == 2:
             self.omega = omega

@@ -6,12 +6,14 @@ from ..utils import H
 import torch
 from tqdm import tqdm
 from ..integrate import eulerstep, hamiltonian_fixed_angle
+from functools import partial
 
 
 class Model(ABC):
     '''Base class for all models.'''
     
-    def __init__(self, input_dim : int, hidden_dim : int, num_layers : int):
+    def __init__(self, targetPotential : callable, input_dim : int, hidden_dim : int, num_layers : int):
+        self.targetPotential = targetPotential
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -66,11 +68,11 @@ class Model(ABC):
         aa = torch.stack((theta, j), dim=-1)
         return torch.autograd.grad(self.hamiltonian(aa), j, allow_unused=True)[0]
 
- 
 
 
-    def integrate(self, aa, steps, t_end, correction_step_size=None, correction=eulerstep, hamiltonian_tilde=hamiltonian_fixed_angle):
-        '''Routine to integrate orbits in AA space and update frequencies regularly, with euler step correction
+    def integrate(self, aa, steps, t_end, correction=eulerstep, hamiltonian_tilde=hamiltonian_fixed_angle):
+        '''
+        Routine to integrate orbits in AA space and update frequencies regularly, with euler step correction
     
         Parameters
         ----------
@@ -139,16 +141,15 @@ class Model(ABC):
         delta_t = torch.tensor(t_end/steps)
         theta_list = torch.zeros(steps)
         j_list = torch.zeros(steps)
-        
-        if correction_step_size is None:
-            correction_step_size = delta_t
-        
+
         theta0 = aa[...,0]
         j0 = aa[...,1]
         freq = _freq_tilde(aa)
-        
+        theta_list[0] = theta0
+        j_list[0] = j0
+        ps0 = self.aa_to_ps(aa)
 
-        for i, t in enumerate(tqdm(torch.linspace(0, t_end, steps))):
+        for i, t in enumerate(tqdm(torch.linspace(0, t_end, steps-1))):
             # evolve in action-angle space
             # drift
             theta_half = theta0 + freq*delta_t/2 # drift 
@@ -159,7 +160,7 @@ class Model(ABC):
 
             # compute Hamiltonian error
 
-            ps_half_corrected = correction(ps_half, correction_step_size, _hamiltonian_error)
+            ps_half_corrected = correction(ps_half, delta_t, _hamiltonian_error)
 
             # convert back to action-angle space
             aa_half_corrected = self.ps_to_aa(ps_half_corrected)
@@ -172,8 +173,8 @@ class Model(ABC):
             # drift
             theta = theta_half_corrected + freq*delta_t/2
 
-            theta_list[i] = theta
-            j_list[i] = j
+            theta_list[i+1] = theta
+            j_list[i+1] = j
             theta0 = theta
             j0 = j
             #print(theta0, J0)

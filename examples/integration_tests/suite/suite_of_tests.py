@@ -185,7 +185,7 @@ def example_orbits_and_derivatives(model, training_data, n_grid_points=100):
     def example_orbit(model, aa0):
         return model.integrate(aa0, 20, 10, correction=rk4, hamiltonian_tilde=h_fixed_angle).to(torch.float64)
     ex_dt = 10/20
-    ps0 = torch.tensor([1.2, 0], requires_grad=True).to(torch.float64)
+    ps0 = torch.tensor([1.0, 0], requires_grad=True).to(torch.float64)
     H0 = H(ps0, model.targetPotential)
     aa0 = model.ps_to_aa(ps0)
     aa_rk4 = example_orbit(model, aa0)
@@ -277,7 +277,7 @@ aa_guess = aa_guess.to(torch.float64)
 
 steps = 100
 sets = 40
-stepsizes = np.logspace(-3, 0, 10)
+stepsizes = np.logspace(-2, 0, 10)
 t_end = 10
 
 dt_big = t_end/20

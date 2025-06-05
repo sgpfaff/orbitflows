@@ -2,7 +2,7 @@
 
 import torch
 
-def dH_dx(ps, wrt, _hamiltonian):
+def dH_dx(ps, wrt, _hamiltonian, method='numerical'):
     '''
     Compute the derivative of the Hamiltonian with respect to q.
     
@@ -19,6 +19,12 @@ def dH_dx(ps, wrt, _hamiltonian):
         function to compute the Hamiltonian of the model prediction.
         Should take a phase-space point as input and return a scalar.
         Called internally in Model integration method.
+
+    method : str
+        method to compute the derivative.
+        Should be either 'autograd' or 'numerical'.
+        If 'autograd', uses torch.autograd.grad to compute the derivative.
+        If 'numerical', uses finite differences to compute the derivative.
     
     Returns
     -------
@@ -31,6 +37,7 @@ def dH_dx(ps, wrt, _hamiltonian):
         return - torch.autograd.grad(_hamiltonian(torch.stack([q0, p0], dim=-1)), q0)[0]
     elif wrt == 'p':
         return torch.autograd.grad(_hamiltonian(torch.stack([q0, p0], dim=-1)), p0)[0]
+    
 
 def eulerstep(ps, delta_t, _hamiltonian_err):
     '''
@@ -54,6 +61,25 @@ def eulerstep(ps, delta_t, _hamiltonian_err):
     p = p0 + delta_t * dH_dx(ps, 'q', _hamiltonian_err)
     q = q0 + delta_t * dH_dx(ps, 'p', _hamiltonian_err)
     return torch.stack([q, p], dim=-1)
+
+def SABA2(ps, delta_t, hamiltonian):
+    '''
+    SABA2 step (Symplectic Euler step)
+
+    Parameters
+    ----------
+    ps : torch.tensor
+        phase-space point
+    
+    delta_t : float
+        time step
+    
+    _hamiltonian_err : callable
+        function to compute the Hamiltonian error of the model prediction.
+        Should take a phase-space point as input and return a scalar.
+        Called internally in Model integration method.
+    ''' 
+    pass
 
 def rungekutta4(ps, delta_t, _hamiltonian_err):
     '''4th order runge-kutta step
