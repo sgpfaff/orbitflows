@@ -12,7 +12,7 @@ class MappingModel(Model):
     Base class for mapping models, which involve toy systems with
     known analytical transformations.
     '''
-    def __init__(self, targetPotential : callable, input_dim, hidden_dim, num_layers, omega):
+    def __init__(self, targetPotential : callable, input_dim, num_layers, omega, layer_class, conditioner, conditioner_args : dict = {}):
         '''
         Initialize the mapping model.
 
@@ -33,7 +33,7 @@ class MappingModel(Model):
         num_layers : int
             The number of layers in the normalizing flow.
         '''
-        Model.__init__(self, input_dim, hidden_dim, num_layers)
+        Model.__init__(self, targetPotential, input_dim, num_layers, layer_class, conditioner, conditioner_args)
         
         if self.input_dim == 2:
             self.omega = omega
@@ -66,6 +66,9 @@ class MappingModel(Model):
     
     @abstractmethod
     def aa_to_ps(self, aa):
+        '''
+        aa : (theta, J)
+        '''
         pass
         
     def train(self, training_data, steps, lr=1e-4, loss_function=scaled_H_std, lf_args=None):

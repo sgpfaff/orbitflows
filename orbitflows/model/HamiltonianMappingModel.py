@@ -1,10 +1,12 @@
 '''Model with an intermediate toy hamiltonian, mapped in phase-space.'''
 
 from .MappingModel import MappingModel
+from ..flow import GradientBasedConditioner
+from ..flow import SymplecticCouplingLayer
 
 
 class HamiltonianMappingModel(MappingModel):
-    def __init__(self, targetPotential : callable, input_dim : int, hidden_dim : int, num_layers : int, omega=1.0):
+    def __init__(self, targetPotential : callable, input_dim : int, num_layers : int, omega=1.0, layer_class : callable = SymplecticCouplingLayer, conditioner : callable = GradientBasedConditioner, conditioner_args : dict = {}):
         '''
         Initialize the normalizing flow model with a toy hamiltonian.
 
@@ -38,7 +40,7 @@ class HamiltonianMappingModel(MappingModel):
         isochroneParams for systems with more than one dimension.
         '''
 
-        MappingModel.__init__(self, targetPotential, input_dim, hidden_dim, num_layers, omega)  
+        MappingModel.__init__(self, targetPotential, input_dim, num_layers, omega, layer_class, conditioner, conditioner_args)  
 
     def aa_to_ps(self, aa):
         '''

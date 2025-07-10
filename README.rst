@@ -1,6 +1,24 @@
 A python package to streamline a machine learning accelerated approach to transforming between action-angle coordinates and phase-space coordinates in galactic potentials.
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+Architecture
+------------
+The purpose of the subpackages are as follows
+
+- ``orbitflows.flow``: Contains class for constructing a flow in pytorch. 
+    - the main class for the normalizing flow is ``GsympNetFlow``
+- ``orbitflows.models``: Contains classes for that wrap around the normalizing flow model 
+    - the models differ by the technique they use to transform between action-angle coordinates and phase-space coordinates in different ways.
+    - for example, models that map between a toy hamiltonian and a target hamiltonian will have different methods than models that map directly between action-angle coordinates and phase-space coordinates, hence they have different classes.
+    - each model is a subclass of ``Model``, ensuring that all models have methods to calculate the hamiltonian as a function of action-angle coordinates, transforming between the coordinate systems with the model, the frequency, and orbit integration using the model.
+    - models that train the normalizing flow to transform between a toy system to a target system are subclasses of ``MappingModel``
+    - ``HamiltonianMappingModel`` transforms trains the normalizing flow to transform between the phase-space coordinates of a toy system to phase-space coordinates in the target system
+- ``orbitflows.utils``: Contains utility functions that are used across the package.
+- ``orbitflows.train``: Contains the functions needed training the machine learning models, including prewritten loss functions.
+
+
+
+
 License
 -------
 
