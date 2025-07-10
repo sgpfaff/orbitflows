@@ -1,7 +1,7 @@
 '''Top level class for all models.'''
 
 from abc import ABC, abstractmethod
-from ..flow import GsympNetFlow
+from ..flow import Flow, GradientBasedConditioner
 from ..utils import H
 import torch
 from tqdm import tqdm
@@ -12,15 +12,14 @@ from functools import partial
 class Model(ABC):
     '''Base class for all models.'''
     
-    def __init__(self, targetPotential : callable, input_dim : int, hidden_dim : int, num_layers : int):
+    def __init__(self, targetPotential : callable, input_dim : int, num_layers : int, layer_class : callable, conditioner : callable, conditioner_args : dict = {}):
         self.targetPotential = targetPotential
         self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
         self.num_layers = num_layers
-        self.flow = GsympNetFlow(input_dim, hidden_dim, num_layers)
+        self.flow = Flow(input_dim, num_layers, layer_class, conditioner=conditioner, conditioner_args=conditioner_args)
         self.optimizer = torch.optim.Adam
         self.loss_list = []
-
+    
         self.training_config = {
             'steps' : None,
             'stepsize' : None,
