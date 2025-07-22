@@ -3,6 +3,7 @@ Generate training data and orbit samples
 '''
 
 import torch
+torch.set_default_dtype(torch.float64)
 from .hamiltonians import H, H_sho
 
 # galpy
