@@ -131,7 +131,9 @@ class SimpleNNConditioner(nn.Module):
             include_bias : bool = True, 
             projection_dims : int = 10,
             num_layers : int = 3,
-            activation = nn.ReLU):
+            activation = nn.ReLU,
+            gate : bool = True
+            ):
         # num_layers is the TOTAL number of layers
         super().__init__() 
         self.input_dims = input_dims
@@ -139,6 +141,7 @@ class SimpleNNConditioner(nn.Module):
         self.projection_dims = projection_dims
         self.include_bias = include_bias
         self.activation = activation
+        self.gate = nn.Parameter(torch.zeros(self.input_dims//2))
 
         layers = []
         layers.append(nn.Linear(in_features=self.input_dims//2, out_features=self.projection_dims, bias=self.include_bias))
@@ -150,10 +153,21 @@ class SimpleNNConditioner(nn.Module):
         layers.append(nn.Linear(in_features=self.projection_dims, out_features=self.input_dims//2, bias=self.include_bias))
         self.layers = nn.Sequential(*layers)
 
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        """Initialize parameters."""
+        for layer in self.layers:
+            if isinstance(layer, torch.nn.Linear):
+                nn.init.xavier_uniform_(layer.weight)
+                nn.init.zeros_(layer.bias)
+        nn.init.zeros_(self.gate)
+
     def forward(self, inputs : torch.Tensor):
         x = inputs
         for layer in self.layers:
             x = layer(x)
+        x = x * self.gate
         return x
     
 

@@ -6,3 +6,4 @@ from .actionAngle import *
 from .grid_viz import * 
 from .potentials import *
 from .functions import *
+from .mappings import *

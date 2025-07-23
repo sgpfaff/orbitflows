@@ -7,7 +7,8 @@ import torch
 from tqdm import tqdm
 from ..integrate import eulerstep, hamiltonian_fixed_angle
 from functools import partial
-
+import json
+from ..utils import conditioner_key_mappings, conditioner_function_mappings, layer_function_mappings, layer_key_mappings
 
 class Model(ABC):
     '''Base class for all models.'''
@@ -18,6 +19,7 @@ class Model(ABC):
         self.num_layers = num_layers
         self.flow = Flow(input_dim, num_layers, layer_class, conditioner=conditioner, conditioner_args=conditioner_args)
         self.optimizer = torch.optim.Adam
+        self.conditioner_args = conditioner_args
         self.loss_list = []
     
         self.training_config = {
@@ -25,6 +27,10 @@ class Model(ABC):
             'stepsize' : None,
             'loss_function' : None
             }
+        
+        # need to fix this so that it can take partial functions.,,
+        self.layer_class_key = layer_class.__name__ #layer_function_mappings[layer_class]
+        self.conditioner_key = conditioner.__name__ #conditioner_function_mappings[conditioner]
 
     @abstractmethod
     def aa_to_ps(self, aa):
@@ -178,7 +184,30 @@ class Model(ABC):
             j0 = j
             #print(theta0, J0)
         return torch.stack([theta_list, j_list], dim=-1)
+    
+    
+    @abstractmethod
+    def to_dict(self):
+        pass
 
     @abstractmethod
-    def save(self):
+    def load(cls, filename):
         pass
+    
+    def save(self, filename):
+        '''
+        Save the model to a file.
+
+        Parameters
+        ----------
+        filename : str
+            The name of the file to save the model to.
+        '''
+        with open(filename + '.json', 'w') as f:
+            json.dump(self.to_dict(), f)
+
+        torch.save(self.flow.state_dict(), filename + '.pt')
+
+    # @abstractmethod
+    # def save(self):
+    #     pass

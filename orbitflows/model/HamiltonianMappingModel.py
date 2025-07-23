@@ -3,6 +3,15 @@
 from .MappingModel import MappingModel
 from ..flow import GradientBasedConditioner
 from ..flow import SymplecticCouplingLayer
+from ..utils import potential_key_mappings as pm
+from ..utils import potential_function_mappings as pfm
+from ..utils import layer_key_mappings
+from ..utils import conditioner_key_mappings
+
+import json
+from functools import partial
+import torch
+import inspect
 
 
 class HamiltonianMappingModel(MappingModel):
@@ -40,7 +49,21 @@ class HamiltonianMappingModel(MappingModel):
         isochroneParams for systems with more than one dimension.
         '''
 
-        MappingModel.__init__(self, targetPotential, input_dim, num_layers, omega, layer_class, conditioner, conditioner_args)  
+        MappingModel.__init__(self, targetPotential, input_dim, num_layers, omega, layer_class, conditioner, conditioner_args)
+        
+        if isinstance(self.targetPotential, partial):
+            self.targetPotentialKey = self.targetPotential.func.__name__
+        try:
+            self.targetPotentialKey =  self.targetPotential.__name__
+        except AttributeError:
+            self.targetPotentialKey =  str(self.targetPotential)
+
+        #self.targetPotentialKey = self.targetPotential.__name__#pfm[self.targetPotential]
+        self.potential_kwargs = {}
+        params = inspect.signature(self.targetPotential).parameters
+        for i, param in enumerate(params):
+            if i != 0:
+                self.potential_kwargs[param] = float(params[param].default)
 
     def aa_to_ps(self, aa):
         '''
@@ -77,3 +100,39 @@ class HamiltonianMappingModel(MappingModel):
         '''
         ps_sho = self.flow.inverse(ps)
         return self.toy_ps_to_aa(ps_sho)
+
+    def to_dict(self):
+        return {
+            "input_dim" : self.input_dim,
+            "num_layers" : self.num_layers,
+            "omega" : self.omega,
+            "layer_class_key" : self.layer_class_key,
+            "conditioner_key" : self.conditioner_key,
+            "conditioner_args" : self.conditioner_args,
+            "targetPotentialKey" : self.targetPotentialKey,
+            "potential_kwargs" : self.potential_kwargs,
+            "loss_list" : self.loss_list
+        }
+    
+    @classmethod
+    def load(cls, filename):
+        '''
+        Load model from file.
+        '''
+        with open(filename+'.json', "r") as f:
+            data = json.load(f)
+
+        for key, value in data['potential_kwargs'].items():
+            data['potential_kwargs'][key] = torch.tensor(value)
+        instance = cls(
+            targetPotential = partial(pm[data['targetPotentialKey']], **data['potential_kwargs']), 
+            input_dim = data['input_dim'],
+            num_layers = data['num_layers'],
+            omega = data['omega'],
+            layer_class = layer_key_mappings[data['layer_class_key']],
+            conditioner = conditioner_key_mappings[data['conditioner_key']],
+            conditioner_args = data['conditioner_args']
+            )
+        instance.flow.load_state_dict(torch.load(filename+'.pt'))
+        instance.loss_list = data['loss_list']
+        return instance

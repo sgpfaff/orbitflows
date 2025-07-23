@@ -35,6 +35,9 @@ def MWPotential2014(z: torch.tensor, R: torch.tensor, amp: torch.tensor=torch.te
     return mnp + nfw #+ pspc
 
 
+def MWPotential2014_1D(z : torch.tensor, R:torch.tensor = torch.tensor(1.0), amp:torch.tensor=torch.tensor(1.0)):
+    return MWPotential2014(z, R=R, amp=amp)
+
 ### Basic 3D Potentials ###
 
 def NFW_Rforce(z : torch.tensor, R : torch.tensor, a : torch.tensor, amp : torch.tensor):
@@ -127,6 +130,11 @@ def PowerSphericalPotentialwCutoff(z, R, amp=torch.tensor(1.0).to(torch.float64)
         return amp * out
 
 # ### Basic 1D Potentials ###
+
+def isoDiskPotential(x, amp=1, sigma=0.1):
+    _H = sigma / torch.sqrt(torch.tensor([8.0 * torch.pi * amp]))[0]
+    _sigma2 = sigma**2
+    return 2.0 * _sigma2 * torch.log(torch.cosh(0.5 * x / _H))
 # def NFWPotential1D(z, R=1.0, amp=1.0, a=1.0):
 #     r = torch.sqrt(R**2.0 + z**2.0)
 #     if isinstance(r, (float, int)) and r == 0:

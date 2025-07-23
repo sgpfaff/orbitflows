@@ -12,3 +12,7 @@ def H_std(ps, targetPotential):
     orbit_energies = H(ps, targetPotential)
     orbit_std = torch.std(orbit_energies, axis=-1)
     return (orbit_std).sum()
+
+def relative_H_error(ps, targetPotential):
+    orbit_energies = H(ps, targetPotential)
+    return None

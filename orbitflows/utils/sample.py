@@ -150,7 +150,7 @@ def generate_sho_orbits(
     
     J, _, phi = aAH.actionsFreqsAngles(q, p)
     #phi = phi + torch.pi
-    aa = torch.cat((phi[:, None], J[:, None]), dim=-1).to(torch.float32)
+    aa = torch.cat((phi[:, None], J[:, None]), dim=-1).to(torch.float64)
     for i, a in enumerate(aa[:,0]):
             if a < 0:
                 aa[:,0][i] = a + 2*np.pi

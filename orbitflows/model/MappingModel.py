@@ -109,17 +109,5 @@ class MappingModel(Model):
             optimizer.step()
                 
             self.loss_list.append(loss.item())
-
-    def save(self, filename, relative_path='../../trained_models/'):
-        '''
-        Save the model to a file.
-
-        Parameters
-        ----------
-        filename : str
-            The name of the file to save the model to.
         
-        relative_path : str
-            The relative path to the directory to save the model in.
-        '''
-        pass
+
