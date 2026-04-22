@@ -20,7 +20,11 @@ import inspect
 
 
 class HamiltonianMappingModel(MappingModel):
-    def __init__(self, targetPotential : callable, input_dim : int, num_layers : int, omega=1.0, layer_class : callable = SymplecticCouplingLayer, conditioner : callable = GradientBasedConditioner, conditioner_args : dict = {}, optimizer=None, scheduler=None):
+    def __init__(self, targetPotential : callable, input_dim : int, num_layers : int, 
+                 omega=1.0, layer_class : callable = SymplecticCouplingLayer, 
+                 conditioner : callable = GradientBasedConditioner, 
+                 conditioner_args : dict = {}, optimizer=None, 
+                 scheduler=None):
         '''
         Initialize the normalizing flow model with a toy hamiltonian.
 
@@ -180,7 +184,6 @@ class HamiltonianMappingModel(MappingModel):
         else:
             training_data_sample = training_data.clone()
 
-
         optimizer = self.optimizer(self.flow.parameters(), lr=lr)
         if self.scheduler is not None:
             scheduler = self.scheduler(optimizer)
@@ -192,12 +195,9 @@ class HamiltonianMappingModel(MappingModel):
             elif orbit_batching:
                 indices = torch.randperm(training_data.shape[0])[:batch_size]
                 training_data_sample = training_data[indices]
-                # plt.plot(*training_data_sample.T)
-                # plt.show()
             elif batching_along_orbits:
                 indices = torch.randperm(training_data.shape[1])[:batch_size]
                 training_data_sample = training_data[:, indices].requires_grad_(True)
-                # print(training_data_sample)
             
             nf_output = self.flow(training_data_sample)
             loss = loss_function(nf_output, **lf_args)
@@ -218,7 +218,6 @@ class HamiltonianMappingModel(MappingModel):
 
             self.loss_list.append(loss.item())
         
-
     def _to_dict(self):
         # Handle conditioner_args with activation functions
         serializable_conditioner_args = self.conditioner_args.copy()

@@ -1,18 +1,18 @@
-from .base import Model
+from .GeneralModel import GeneralModel
 from abc import abstractmethod
-from ..util import scaled_H_std
 from ..dynamics import actionAngleHarmonic, actionAngleHarmonicInverse
 import torch
-import matplotlib.pyplot as plt
 
 '''Base class for mapping models.'''
 
-class MappingModel(Model):
+class MappingModel(GeneralModel):
     '''
     Base class for mapping models, which involve toy systems with
     known analytical transformations.
     '''
-    def __init__(self, targetPotential : callable, input_dim, num_layers, omega, layer_class, conditioner, conditioner_args : dict = {}, optimizer=None, scheduler=None):
+    def __init__(self, targetPotential : callable, input_dim : int, num_layers : int, 
+                 omega : float, layer_class, conditioner, conditioner_args : dict = {}, 
+                 optimizer=None, scheduler=None):
         '''
         Initialize the mapping model.
 
@@ -33,7 +33,7 @@ class MappingModel(Model):
         num_layers : int
             The number of layers in the normalizing flow.
         '''
-        Model.__init__(self, targetPotential, input_dim, num_layers, layer_class, conditioner, conditioner_args, optimizer, scheduler)
+        GeneralModel.__init__(self, targetPotential, input_dim, num_layers, layer_class, conditioner, conditioner_args, optimizer, scheduler)
         
         if self.input_dim == 2:
             self.omega = omega
@@ -52,9 +52,7 @@ class MappingModel(Model):
                 q, p = actionAngleHarmonicInverse(omega=self.omega)(j, theta)
                 return torch.stack((q, p), dim=-1)
         else: 
-            # in the future, _aa_to_toy_ps and _toy_ps_to_aa will be defined here 
-            # for higher dimensional systems, using the isochrone potential as the toy potential.
-            raise ValueError("Only 1D systems are currently supported. 2D and 3D will be added in the future.")
+            raise NotImplementedError("Only 1D systems are currently supported. 2D and 3D will be added in the future.")
             
         self.toy_ps_to_aa = _toy_ps_to_aa 
         self.aa_to_toy_ps = _aa_to_toy_ps
@@ -70,6 +68,7 @@ class MappingModel(Model):
         aa : (theta, J)
         '''
         pass
+    
     @abstractmethod
     def train(self, training_data, steps, lr, loss_function, lf_args, orbit_batching=False, batching_along_orbits=False, batch_size=None, updates=False):
         pass
