@@ -11,7 +11,7 @@ from ..dynamics import eulerstep, hamiltonian_fixed_angle, rungekutta4
 from ..util import (conditioner_key_mappings, conditioner_function_mappings, 
                     layer_function_mappings, layer_key_mappings)
 
-class GeneralModel(ABC):
+class BaseModel(ABC):
     '''Base class for all models.'''
 
     def __init__(self, targetPotential : callable, input_dim : int, num_layers : int, layer_class : callable, conditioner : callable, conditioner_args : dict = {}, optimizer = None, scheduler = None):

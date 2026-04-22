@@ -1,11 +1,11 @@
-from .GeneralModel import GeneralModel
+from .BaseModel import BaseModel
 from abc import abstractmethod
 from ..dynamics import actionAngleHarmonic, actionAngleHarmonicInverse
 import torch
 
 '''Base class for mapping models.'''
 
-class MappingModel(GeneralModel):
+class MappingModel(BaseModel):
     '''
     Base class for mapping models, which involve toy systems with
     known analytical transformations.
@@ -33,7 +33,7 @@ class MappingModel(GeneralModel):
         num_layers : int
             The number of layers in the normalizing flow.
         '''
-        GeneralModel.__init__(self, targetPotential, input_dim, num_layers, layer_class, conditioner, conditioner_args, optimizer, scheduler)
+        BaseModel.__init__(self, targetPotential, input_dim, num_layers, layer_class, conditioner, conditioner_args, optimizer, scheduler)
         
         if self.input_dim == 2:
             self.omega = omega
@@ -68,7 +68,7 @@ class MappingModel(GeneralModel):
         aa : (theta, J)
         '''
         pass
-    
+
     @abstractmethod
     def train(self, training_data, steps, lr, loss_function, lf_args, orbit_batching=False, batching_along_orbits=False, batch_size=None, updates=False):
         pass
