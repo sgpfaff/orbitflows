@@ -5,7 +5,8 @@ from .MappingModel import MappingModel
 from .flow import GradientBasedConditioner
 from .flow import SymplecticCouplingLayer
 from tqdm import tqdm
-from ..util import scaled_H_std
+from ..dynamics import H
+from ..util import scaled_H_std, max_error_along_orbs, mean_error_along_orbs
 from ..util import potential_key_mappings as pm
 from ..util import potential_function_mappings as pfm
 from ..util import optimizer_key_mappings as okm
@@ -20,7 +21,7 @@ import inspect
 
 
 class HamiltonianMappingModel(MappingModel):
-    def __init__(self, targetPotential : callable, input_dim : int, num_layers : int, 
+    def __init__(self, targetPotential : callable, input_dim : int, n_layers : int, 
                  omega=1.0, layer_class : callable = SymplecticCouplingLayer, 
                  conditioner : callable = GradientBasedConditioner, 
                  conditioner_args : dict = {}, optimizer=None, 
@@ -45,7 +46,7 @@ class HamiltonianMappingModel(MappingModel):
         hidden_dim : int
             The dimensions of the hidden layers.
 
-        num_layers : int
+        n_layers : int
             The number of layers in the normalizing flow.
 
         omega : float, optional
@@ -58,7 +59,7 @@ class HamiltonianMappingModel(MappingModel):
         isochroneParams for systems with more than one dimension.
         '''
 
-        MappingModel.__init__(self, targetPotential, input_dim, num_layers, omega, layer_class, conditioner, conditioner_args, optimizer, scheduler)
+        MappingModel.__init__(self, targetPotential, input_dim, n_layers, omega, layer_class, conditioner, conditioner_args, optimizer, scheduler)
         
         if isinstance(self.targetPotential, partial):
             self.targetPotentialKey = self.targetPotential.func.__name__
@@ -145,7 +146,7 @@ class HamiltonianMappingModel(MappingModel):
               orbit_batching=False, 
               batching_along_orbits=False, 
               batch_size=None, 
-              update_frequency=100,
+              update_frequency=25,
               update_plots=False):
         '''
         Train the model.
@@ -183,11 +184,12 @@ class HamiltonianMappingModel(MappingModel):
                 batch_size = training_data.shape[0] // 10
         else:
             training_data_sample = training_data.clone()
-
+        
         optimizer = self.optimizer(self.flow.parameters(), lr=lr)
         if self.scheduler is not None:
             scheduler = self.scheduler(optimizer)
-        for epoch in tqdm(range(steps)):
+        pbar = tqdm(range(steps), desc="Training", disable=update_frequency is None)
+        for epoch in pbar:
             if batching_along_orbits and orbit_batching:
                 indices_for_orbits = torch.randperm(training_data.shape[1])[:batch_size]
                 indices_along_orbit = torch.randperm(training_data.shape[1])[:batch_size]
@@ -203,19 +205,24 @@ class HamiltonianMappingModel(MappingModel):
             loss = loss_function(nf_output, **lf_args)
             if update_frequency is not None:
                 if epoch % update_frequency == 0:
+                    mean_mean_error = mean_error_along_orbs(H(nf_output, self.targetPotential)).mean().item()
+                    mean_max_error = max_error_along_orbs(H(nf_output, self.targetPotential)).mean().item()
                     if update_plots:
                         plt.scatter(*training_data_sample.detach().cpu().numpy().T)
                         plt.show()
-                    tqdm.write(f"\nEpoch {epoch}: {loss.item()}")
                     if self.scheduler is not None:
-                        tqdm.write(f"LR : {scheduler.optimizer.param_groups[0]['lr']}")
+                        pbar.set_postfix(loss=loss.item(), lr = scheduler.optimizer.param_groups[0]['lr'],
+                                         mean_max_error=mean_max_error,
+                                         mean_mean_error=mean_mean_error)
+                    else:
+                        pbar.set_postfix(loss=loss.item(), mean_max_error = mean_max_error,
+                                         mean_mean_error=mean_mean_error)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             if self.scheduler is not None:
                 scheduler.step(loss)
                 self.lr_list.append(scheduler.optimizer.param_groups[0]['lr'])
-
             self.loss_list.append(loss.item())
         
     def _to_dict(self):

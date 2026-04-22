@@ -19,7 +19,7 @@ from ..util import conditioner_key_mappings
 
 
 class TorusMappingModel(MappingModel):
-    def __init__(self, targetPotential : callable, input_dim : int, num_layers : int, omega=1.0, layer_class : callable = TorusSymplecticCouplingLayer, conditioner : callable = GradientBasedConditioner, conditioner_args : dict = {}, optimizer=None, scheduler=None):
+    def __init__(self, targetPotential : callable, input_dim : int, n_layers : int, omega=1.0, layer_class : callable = TorusSymplecticCouplingLayer, conditioner : callable = GradientBasedConditioner, conditioner_args : dict = {}, optimizer=None, scheduler=None):
         '''
         Initialize the normalizing flow model with a toy hamiltonian. TorusMappingModel deforms
         toy tori in action-angle space, trained by the outputs conservation of energy after
@@ -42,7 +42,7 @@ class TorusMappingModel(MappingModel):
         hidden_dim : int
             The dimensions of the hidden layers.
 
-        num_layers : int
+        n_layers : int
             The number of layers in the normalizing flow.
 
         omega : float, optional
@@ -57,7 +57,7 @@ class TorusMappingModel(MappingModel):
         '''
 
 
-        MappingModel.__init__(self, targetPotential, input_dim, num_layers, omega, layer_class, conditioner, conditioner_args, optimizer, scheduler)
+        MappingModel.__init__(self, targetPotential, input_dim, n_layers, omega, layer_class, conditioner, conditioner_args, optimizer, scheduler)
         
         if isinstance(self.targetPotential, partial):
             self.targetPotentialKey = self.targetPotential.func.__name__

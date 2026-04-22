@@ -10,7 +10,7 @@ class MappingModel(BaseModel):
     Base class for mapping models, which involve toy systems with
     known analytical transformations.
     '''
-    def __init__(self, targetPotential : callable, input_dim : int, num_layers : int, 
+    def __init__(self, targetPotential : callable, input_dim : int, n_layers : int, 
                  omega : float, layer_class, conditioner, conditioner_args : dict = {}, 
                  optimizer=None, scheduler=None):
         '''
@@ -30,10 +30,10 @@ class MappingModel(BaseModel):
         hidden_dim : int
             The dimensions of the hidden layers.
 
-        num_layers : int
+        n_layers : int
             The number of layers in the normalizing flow.
         '''
-        BaseModel.__init__(self, targetPotential, input_dim, num_layers, layer_class, conditioner, conditioner_args, optimizer, scheduler)
+        BaseModel.__init__(self, targetPotential, input_dim, n_layers, layer_class, conditioner, conditioner_args, optimizer, scheduler)
         
         if self.input_dim == 2:
             self.omega = omega

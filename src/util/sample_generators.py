@@ -175,7 +175,7 @@ def generate_sho_orbits(n_orbits : int, omega : float, t_end : float, n_steps : 
 
     Parameters:
     ----------
-    num_orbits : int
+    n_orbits : int
         number of orbits to generate
     omega : float
         frequency of the SHO

@@ -14,11 +14,11 @@ from ..util import (conditioner_key_mappings, conditioner_function_mappings,
 class BaseModel(ABC):
     '''Base class for all models.'''
 
-    def __init__(self, targetPotential : callable, input_dim : int, num_layers : int, layer_class : callable, conditioner : callable, conditioner_args : dict = {}, optimizer = None, scheduler = None):
+    def __init__(self, targetPotential : callable, input_dim : int, n_layers : int, layer_class : callable, conditioner : callable, conditioner_args : dict = {}, optimizer = None, scheduler = None):
         self.targetPotential = targetPotential
         self.input_dim = input_dim
-        self.num_layers = num_layers
-        self.flow = Flow(input_dim, num_layers, layer_class, conditioner=conditioner, conditioner_args=conditioner_args)
+        self.n_layers = n_layers
+        self.flow = Flow(input_dim, n_layers, layer_class, conditioner=conditioner, conditioner_args=conditioner_args)
         if optimizer is not None:
             self.optimizer = optimizer
         else:
