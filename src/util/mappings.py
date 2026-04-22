@@ -1,5 +1,6 @@
 from ..dynamics.potentials import *
-from ..models import GradientBasedConditioner, NNConditioner, SimpleNNConditioner, SymplecticCouplingLayer, TorusSymplecticCouplingLayer, WrappedAnglesCouplingLayer
+from ..models.flow import (GradientBasedConditioner, NNConditioner, SimpleNNConditioner, 
+                      SymplecticCouplingLayer, TorusSymplecticCouplingLayer, WrappedAnglesCouplingLayer)
 
 
 potential_key_mappings = {

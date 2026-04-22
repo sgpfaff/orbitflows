@@ -1,10 +1,5 @@
 import torch
 from functools import partial
-from .functions import gamma
-from scipy import special
-import torch
-from functools import partial
-from .functions import gamma
 from torch import special
 
 ### Useful Functions ###
@@ -15,6 +10,28 @@ def normalize_(norm, Rforce):
         """
         return  norm / torch.abs(Rforce(torch.tensor(0.0).to(torch.float64), torch.tensor(1.0).to(torch.float64)))
 
+def gamma(x : torch.tensor):
+    return torch.special.gammaln(x).exp()
+
+def hyp1f1(a, b, z, max_iter=100, tol=1e-8):
+    # Ensure tensors broadcast
+    a, b, z = map(lambda t: t.unsqueeze(-1), (a, b, z))
+    k = torch.arange(0, max_iter, device=z.device).float()
+    # Compute (a)_k / (b)_k for each k
+    num = torch.lgamma(a + k) - torch.lgamma(a)
+    den = torch.lgamma(b + k) - torch.lgamma(b)
+    poch_ratio = torch.exp(num - den)
+    # k! via gammaln
+    fact = torch.exp(torch.lgamma(k + 1))
+    term = poch_ratio * (z**k) / fact  # shape (..., max_iter)
+    series = torch.cumsum(term, dim=-1)
+    # Early stopping
+    last_terms = term[..., -1]
+    if torch.max(last_terms.abs()) < tol:
+        return series[..., -1]
+    else:
+        return series[..., -1]
+    
 ### Analytically Tractible Potentials ###
 
 def sho_potential(x, omega):
@@ -23,6 +40,23 @@ def sho_potential(x, omega):
 ### Milky Way Potentials ###
 
 def MWPotential2014(z: torch.tensor, R: torch.tensor, amp: torch.tensor=torch.tensor(1.0).to(torch.float64)):
+    '''
+    Milky Way potential from Bovy 2015, with the same parameters as galpy's implementation.
+    
+    Parameters
+    ----------
+    z : torch.tensor
+        vertical coordinate.
+    R : torch.tensor
+        radial coordinate.
+    amp : torch.tensor
+        amplitude of the potential, used for normalization. Default is 1.0.
+    
+    Returns
+    -------
+    torch.tensor
+        potential at the given coordinates.
+    '''
     pspc = PowerSphericalPotentialwCutoff(z, R, normalize=0.05, alpha=torch.tensor(1.8).to(torch.float64), rc=torch.tensor(1.9 / 8.0).to(torch.float64), amp=amp) 
     mnp = MiyamotoNagaiPotential(z, R, a=torch.tensor(3.0 / 8.0).to(torch.float64), b=torch.tensor(0.28 / 8.0).to(torch.float64), normalize=0.6, amp=amp) 
     nfw = NFWPotential(z, R, a=torch.tensor(2.0).to(torch.float64), normalize=0.35, amp=amp)
@@ -30,6 +64,24 @@ def MWPotential2014(z: torch.tensor, R: torch.tensor, amp: torch.tensor=torch.te
 
 
 def MWPotential2014_1D(z : torch.tensor, R:torch.tensor = torch.tensor(1.0), amp:torch.tensor=torch.tensor(1.0)):
+    '''
+    Vertical Milky Way potential from Bovy 2015, with the same 
+    parameters as galpy's implementation.
+
+    Parameters
+    ----------
+    z : torch.tensor
+        vertical coordinate.
+    R : torch.tensor
+        radial coordinate, default is 1.0 (solar radius).
+    amp : torch.tensor
+        amplitude of the potential, used for normalization. Default is 1.0.
+    
+    Returns
+    -------
+    torch.tensor        
+        potential at the given coordinates.
+    '''
     midplane_potential = MWPotential2014(torch.tensor(0.0), R, amp=amp)
     return MWPotential2014(z, R=R, amp=amp) - midplane_potential
 

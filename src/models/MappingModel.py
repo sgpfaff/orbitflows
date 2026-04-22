@@ -1,7 +1,7 @@
 from .base import Model
 from abc import abstractmethod
-from ..train import scaled_H_std
-from ..utils import actionAngleHarmonic, actionAngleHarmonicInverse
+from ..util import scaled_H_std
+from ..dynamics import actionAngleHarmonic, actionAngleHarmonicInverse
 import torch
 import matplotlib.pyplot as plt
 
