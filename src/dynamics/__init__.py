@@ -7,3 +7,5 @@ from .potentials import (isoDiskPotential, sho_potential, MWPotential2014_1D,
                          MiyamotoNagaiPotential_1D, MiyamotoNagaiPotential, 
                          PowerSphericalwCutoff_Rforce,
                          PowerSphericalPotentialwCutoff)
+
+from .integration import eulerstep, hamiltonian_fixed_angle, rungekutta4

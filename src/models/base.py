@@ -1,14 +1,15 @@
 '''Top level class for all models.'''
 
 from abc import ABC, abstractmethod
-from ..flow import Flow, GradientBasedConditioner
-from ..utils import H
+from .flow import Flow, GradientBasedConditioner
+from ..dynamics import H
 import torch
 from tqdm import tqdm
-from ..integrate import eulerstep, hamiltonian_fixed_angle
 from functools import partial
 import json
-from ..utils import conditioner_key_mappings, conditioner_function_mappings, layer_function_mappings, layer_key_mappings
+from ..dynamics import eulerstep, hamiltonian_fixed_angle, rungekutta4
+from ..util import (conditioner_key_mappings, conditioner_function_mappings, 
+                    layer_function_mappings, layer_key_mappings)
 
 class Model(ABC):
     '''Base class for all models.'''
@@ -36,10 +37,9 @@ class Model(ABC):
             'stepsize' : None,
             'loss_function' : None
             }
-        
-        # need to fix this so that it can take partial functions.,,
-        self.layer_class_key = layer_class.__name__ #layer_function_mappings[layer_class]
-        self.conditioner_key = conditioner.__name__ #conditioner_function_mappings[conditioner]
+    
+        self.layer_class_key = layer_class.__name__ 
+        self.conditioner_key = conditioner.__name__ 
 
     @abstractmethod
     def aa_to_ps(self, aa):
@@ -78,7 +78,6 @@ class Model(ABC):
     def frequency(self, aa):
         '''Compute the frequency of the system.'''
         theta, j = aa[..., 0], aa[..., 1]
-        #theta.requires_grad = True
         aa = torch.stack((theta, j), dim=-1)
         return torch.autograd.grad(self.hamiltonian(aa), j, allow_unused=True)[0]
 
@@ -191,12 +190,12 @@ class Model(ABC):
             j_list[i+1] = j
             theta0 = theta
             j0 = j
-            #print(theta0, J0)
+
         return torch.stack([theta_list, j_list], dim=-1)
     
     
     @abstractmethod
-    def to_dict(self):
+    def _to_dict(self):
         pass
 
     @abstractmethod
@@ -213,7 +212,7 @@ class Model(ABC):
             The name of the file to save the model to.
         '''
         with open(filename + '.json', 'w') as f:
-            json.dump(self.to_dict(), f)
+            json.dump(self._to_dict(), f)
 
         torch.save(self.flow.state_dict(), filename + '.pt')
 

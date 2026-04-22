@@ -1,21 +1,21 @@
 '''Model with an intermediate toy hamiltonian, mapped in action angle space.'''
 
 from .MappingModel import MappingModel
-from ..flow import GradientBasedConditioner
-from ..flow import TorusSymplecticCouplingLayer, TorusProjectionLayer
+from .flow import GradientBasedConditioner
+from .flow import TorusSymplecticCouplingLayer
 from tqdm import tqdm
 import json
 from functools import partial
 import torch
 import inspect
 import matplotlib.pyplot as plt
-from ..train import scaled_H_std
-from ..utils import potential_key_mappings as pm
-from ..utils import potential_function_mappings as pfm
-from ..utils import optimizer_key_mappings as okm
-from ..utils import scheduler_key_mappings as skm
-from ..utils import layer_key_mappings
-from ..utils import conditioner_key_mappings
+from ..util import scaled_H_std
+from ..util import potential_key_mappings as pm
+from ..util import potential_function_mappings as pfm
+from ..util import optimizer_key_mappings as okm
+from ..util import scheduler_key_mappings as skm
+from ..util import layer_key_mappings
+from ..util import conditioner_key_mappings
 
 
 class TorusMappingModel(MappingModel):
@@ -99,7 +99,6 @@ class TorusMappingModel(MappingModel):
                     self.scheduler_kwargs[param] = float(params[param].default)
                 else:
                     self.scheduler_kwargs[param] = params[param].default
-        #self.flow.layers.append(TorusProjectionLayer())
     def _transform_to_periodic(self, aa):
         '''
         Transform action-angle coordinates to periodic coordinates for the flow.
@@ -117,6 +116,7 @@ class TorusMappingModel(MappingModel):
         theta, j = aa[...,0], aa[...,1]
         input_data = torch.stack((torch.sin(theta), j), dim=-1)
         return input_data
+    
     def _transform_from_periodic(self, periodic_aa):
         '''
         Transform periodic coordinates back to action-angle coordinates.
@@ -150,9 +150,7 @@ class TorusMappingModel(MappingModel):
         torch.Tensor
             The approximate phase-space coordinates cooresponding to the input.
         '''
-        #periodic_aa = self._transform_to_periodic(aa)
         aa_toy = self.flow(aa)
-        #aa_toy = self._transform_from_periodic(aa_toy_periodic)
         return self.aa_to_toy_ps(aa_toy)
     
     def ps_to_aa(self, ps):
@@ -171,9 +169,7 @@ class TorusMappingModel(MappingModel):
             The approximate action angle coordinates cooresponding to the input.
         '''
         aa_toy = self.toy_ps_to_aa(ps)
-        #aa_toy_periodic = self._transform_to_periodic(aa_toy)
-        aa = self.flow.inverse(aa_toy)
-        return aa #self._transform_from_periodic(aa_periodic)
+        return self.flow.inverse(aa_toy)
 
     def train(self, 
               training_data, 
@@ -209,8 +205,10 @@ class TorusMappingModel(MappingModel):
             Arguments to pass to the loss function.
             If the loss function is scaled_H_std, then lf_args should contain
             the target potential to use for the training.
+
         update_frequency : str
             Frequency of updates. No updates if None.
+
         update_plots : bool
             Whether to update plots during training.
         '''
@@ -223,7 +221,6 @@ class TorusMappingModel(MappingModel):
         else:
             training_data_sample = training_data.clone()
 
-
         optimizer = self.optimizer(self.flow.parameters(), lr=lr)
         if self.scheduler is not None:
             scheduler = self.scheduler(optimizer)
@@ -235,12 +232,9 @@ class TorusMappingModel(MappingModel):
             elif orbit_batching:
                 indices = torch.randperm(training_data.shape[0])[:batch_size]
                 training_data_sample = training_data[indices]
-                # plt.plot(*training_data_sample.T)
-                # plt.show()
             elif batching_along_orbits:
                 indices = torch.randperm(training_data.shape[1])[:batch_size]
                 training_data_sample = training_data[:, indices].requires_grad_(True)
-                # print(training_data_sample)
             
             nf_output = self.aa_to_ps(training_data_sample)
             
@@ -316,7 +310,7 @@ class TorusMappingModel(MappingModel):
         instance.lr_list = data['lr_list']
         return instance
 
-    def to_dict(self):
+    def _to_dict(self):
         # Handle conditioner_args with activation functions
         serializable_conditioner_args = self.conditioner_args.copy()
         

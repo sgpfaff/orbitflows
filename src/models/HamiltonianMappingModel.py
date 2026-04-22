@@ -2,16 +2,16 @@
 
 import matplotlib.pyplot as plt
 from .MappingModel import MappingModel
-from ..flow import GradientBasedConditioner
-from ..flow import SymplecticCouplingLayer
+from .flow import GradientBasedConditioner
+from .flow import SymplecticCouplingLayer
 from tqdm import tqdm
-from ..train import scaled_H_std
-from ..utils import potential_key_mappings as pm
-from ..utils import potential_function_mappings as pfm
-from ..utils import optimizer_key_mappings as okm
-from ..utils import scheduler_key_mappings as skm
-from ..utils import layer_key_mappings
-from ..utils import conditioner_key_mappings
+from ..util import scaled_H_std
+from ..util import potential_key_mappings as pm
+from ..util import potential_function_mappings as pfm
+from ..util import optimizer_key_mappings as okm
+from ..util import scheduler_key_mappings as skm
+from ..util import layer_key_mappings
+from ..util import conditioner_key_mappings
 
 import json
 from functools import partial
@@ -170,6 +170,7 @@ class HamiltonianMappingModel(MappingModel):
         update_plots : bool
             Whether to update plots during training.
         '''
+
         if loss_function == scaled_H_std and lf_args is None:
             lf_args={'targetPotential' : self.targetPotential}
 
@@ -218,7 +219,7 @@ class HamiltonianMappingModel(MappingModel):
             self.loss_list.append(loss.item())
         
 
-    def to_dict(self):
+    def _to_dict(self):
         # Handle conditioner_args with activation functions
         serializable_conditioner_args = self.conditioner_args.copy()
         
