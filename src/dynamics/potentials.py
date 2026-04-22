@@ -132,8 +132,7 @@ def IsochronePotential(z, R, b=torch.tensor(1.0), amp=torch.tensor(1.0)):
 
 def PowerSphericalwCutoff_mass_(R, alpha, rc, amp, z=None):
     if z is not None:
-        raise AttributeError  # use general implementation
-    R = torch.tensor(R)
+        raise AttributeError 
     r2 = R**2.0
     out = 2. * torch.pi * rc ** (3. - alpha) * (gamma(1.5 - 0.5 * alpha) * special.gammainc(1.5 - 0.5 * alpha, r2 / rc / rc))
     return out

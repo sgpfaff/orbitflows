@@ -221,7 +221,7 @@ class HamiltonianMappingModel(MappingModel):
             loss.backward()
             optimizer.step()
             if self.scheduler is not None:
-                scheduler.step(loss)
+                scheduler.step(loss.detach())
                 self.lr_list.append(scheduler.optimizer.param_groups[0]['lr'])
             self.loss_list.append(loss.item())
         
