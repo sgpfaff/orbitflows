@@ -147,7 +147,8 @@ class HamiltonianMappingModel(MappingModel):
               batching_along_orbits=False, 
               batch_size=None, 
               update_frequency=25,
-              update_plots=False):
+              update_plots=False,
+              nested_progress=False):
         '''
         Train the model.
         
@@ -188,7 +189,11 @@ class HamiltonianMappingModel(MappingModel):
         optimizer = self.optimizer(self.flow.parameters(), lr=lr)
         if self.scheduler is not None:
             scheduler = self.scheduler(optimizer)
-        pbar = tqdm(range(steps), desc="Training", disable=update_frequency is None)
+        
+        if nested_progress:
+            pbar = tqdm(range(steps), desc="Training", position=1, leave=False)
+        else:
+            pbar = tqdm(range(steps), desc="Training", disable=update_frequency is None)
         for epoch in pbar:
             if batching_along_orbits and orbit_batching:
                 indices_for_orbits = torch.randperm(training_data.shape[1])[:batch_size]

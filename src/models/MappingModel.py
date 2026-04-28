@@ -70,6 +70,6 @@ class MappingModel(BaseModel):
         pass
 
     @abstractmethod
-    def train(self, training_data, steps, lr, loss_function, lf_args, orbit_batching=False, batching_along_orbits=False, batch_size=None, updates=False):
+    def train(self, training_data, steps, lr, loss_function, lf_args, orbit_batching=False, batching_along_orbits=False, batch_size=None, updates=False, nested_progress=False):
         pass
 

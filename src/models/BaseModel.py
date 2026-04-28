@@ -50,7 +50,7 @@ class BaseModel(ABC):
         pass
 
     @abstractmethod
-    def train(self, training_data, steps, loss_function):
+    def train(self, training_data, steps, loss_function, nested_progress=False):
         '''Train the model.'''
         pass
 
