@@ -77,7 +77,6 @@ def generate_grid(n_orbits, nsteps, zmin, zmax):
         freqs.append(aA1Dinv.Freqs(action))
         xvs.append(np.array(aA1Dinv(action, angles)))
     xvs = np.array(xvs).swapaxes(1,2)
-    #xvs = np.array([np.array(aA1Dinv(action,angles)) for action in actions]).swapaxes(1,2)
 
     return xvs, wrap_angles(aa), freqs
 
