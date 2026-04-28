@@ -1,0 +1,12 @@
+name: scaling_train_size
+defaults: ../configs/_base.yaml
+
+device: cuda
+# Reuses every default; only overrides the swept axis and seeds.
+# seeds: [0, 1, 2]
+fixed:
+  training:
+    steps: 2000
+sweep:
+  data.n_orbits: [16, 32, 64, 128]#, 256]
+  data.n_steps: [64, 128, 256, 512]#, 1028]

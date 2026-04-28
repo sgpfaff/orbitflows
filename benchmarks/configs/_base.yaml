@@ -1,0 +1,60 @@
+# Default config inherited by every benchmark.
+# Individual benchmarks override pieces via `defaults: ../configs/_base.yaml`.
+#
+# Mirrors the quickstart notebook setup:
+#   - SHO training data with omega=1.5
+#   - HamiltonianMappingModel + SymplecticCouplingLayer + SimpleNNConditioner
+#   - MWPotential2014_1D as the target
+#   - Adam + ReduceLROnPlateau, scaled_H_std loss
+
+device: cpu          # "cpu", "cuda", or "auto" (the quickstart uses cpu)
+dtype: float32
+
+fixed:
+  data:
+    omega: 1.5
+    n_orbits: 10
+    n_steps: 100
+    r_bounds: [0.15, 0.75]
+
+  potential:
+    name: MWPotential2014_1D
+    kwargs: {}        # dict -> torch.tensor(value) at build time
+
+  model:
+    class: HamiltonianMappingModel
+    input_dim: 2
+    n_layers: 10
+    layer_class: SymplecticCouplingLayer
+    conditioner:
+      class: SimpleNNConditioner
+      args:
+        num_layers: 5
+        projection_dims: 64
+        activation: ReLU
+        include_bias: true
+
+  optimizer:
+    class: Adam
+
+  scheduler:
+    class: ReduceLROnPlateau
+    mode: min
+    patience: 50
+    factor: 0.9
+    threshold: 1.0e-7
+    threshold_mode: rel
+
+  training:
+    steps: 1000
+    lr: 1.0e-3
+    loss: scaled_H_std
+    update_frequency: 50   # silence tqdm bar inside model.train
+
+  eval:
+    n_orbits: 100
+    n_steps: 1000
+    r_bounds: [0.15, 0.75]
+
+seeds: [0]
+sweep: {}
