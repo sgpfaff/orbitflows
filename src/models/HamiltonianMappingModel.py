@@ -246,7 +246,7 @@ class HamiltonianMappingModel(MappingModel):
         
         return {
             "input_dim" : self.input_dim,
-            "num_layers" : self.num_layers,
+            "n_layers" : self.n_layers,
             "omega" : self.omega,
             "layer_class_key" : self.layer_class_key,
             "conditioner_key" : self.conditioner_key,
@@ -297,7 +297,7 @@ class HamiltonianMappingModel(MappingModel):
         instance = cls(
             targetPotential = partial(pm[data['targetPotentialKey']], **data['potential_kwargs']), 
             input_dim = data['input_dim'],
-            num_layers = data['num_layers'],
+            n_layers = data['n_layers'],
             omega = data['omega'],
             layer_class = layer_key_mappings[data['layer_class_key']],
             conditioner = conditioner_key_mappings[data['conditioner_key']],
