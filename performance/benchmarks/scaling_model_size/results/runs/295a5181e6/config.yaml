@@ -1,0 +1,46 @@
+data:
+  omega: 1.5
+  n_orbits: 16
+  n_steps: 256
+  r_bounds:
+  - 0.15
+  - 0.75
+potential:
+  name: MWPotential2014_1D
+  kwargs: {}
+model:
+  class: HamiltonianMappingModel
+  input_dim: 2
+  n_layers: 64
+  layer_class: SymplecticCouplingLayer
+  conditioner:
+    class: SimpleNNConditioner
+    args:
+      num_layers: 16
+      projection_dims: 64
+      activation: ReLU
+      include_bias: true
+optimizer:
+  class: Adam
+scheduler:
+  class: ReduceLROnPlateau
+  mode: min
+  patience: 50
+  factor: 0.9
+  threshold: 1.0e-07
+  threshold_mode: rel
+training:
+  steps: 5000
+  lr: 0.001
+  loss: scaled_H_std
+  update_frequency: 50
+eval:
+  n_orbits: 100
+  n_steps: 1000
+  r_bounds:
+  - 0.15
+  - 0.75
+device: cpu
+dtype: float32
+seed: 0
+_name: scaling_train_size
