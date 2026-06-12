@@ -1,0 +1,16 @@
+name: scaling_train_size
+defaults: ../configs/_base.yaml
+
+device: cpu
+fixed:
+  scheduler:
+    threshold: 1.0e-13
+  training:
+    steps: 100_000
+  data:
+    n_orbits: 16
+    n_steps: 256
+sweep:
+  model.n_layers: [32, 64]
+  model.conditioner.args.num_layers: [2, 4]
+  dtype: [float32, float64]
