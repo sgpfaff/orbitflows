@@ -1,0 +1,17 @@
+name: scaling_train_size
+defaults: ../configs/_base.yaml
+
+device: cpu
+# Reuses every default; only overrides the swept axis and seeds.
+# seeds: [0, 1, 2]
+fixed:
+  model:
+      n_layers: 16
+      conditioner:
+        args:
+          num_layers: 2
+  training:
+    steps: 2_000
+sweep:
+  data.n_orbits: [8, 32, 128, 512]
+  data.n_steps: [32, 128, 512, 2056]
