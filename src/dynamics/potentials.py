@@ -12,6 +12,7 @@ import torch
 
 from galpy.potential import MWPotential2014 as _MWPotential2014
 from galpy.potential import evaluatePotentials as _evaluatePotentials
+from galpy.potential import IsothermalDiskPotential as _IsothermalDiskPotential
 
 
 ### Analytically tractable toy potentials ###
@@ -22,10 +23,15 @@ def sho_potential(x, omega):
 
 
 def isoDiskPotential(x, amp=1, sigma=0.1):
-    '''Self-gravitating isothermal-sheet potential.'''
-    _H = sigma / torch.sqrt(torch.tensor([8.0 * torch.pi * amp]))[0]
-    _sigma2 = sigma**2
-    return 2.0 * _sigma2 * torch.log(torch.cosh(0.5 * x / _H))
+    '''
+    galpy's self-gravitating isothermal-disk potential, evaluated through the
+    torch backend.
+
+    Phi(x) = 2 sigma^2 log(cosh(x / (2H))) with H^2 = sigma^2 / (8 pi amp), so
+    Phi(0) = 0. The signature is preserved so models saved with
+    ``potential_kwargs={'amp': ..., 'sigma': ...}`` keep loading.
+    '''
+    return _IsothermalDiskPotential(amp=amp, sigma=sigma)(x, use_physical=False)
 
 
 ### Milky Way potential (galpy torch backend) ###
