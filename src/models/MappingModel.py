@@ -1,6 +1,6 @@
 from .BaseModel import BaseModel
 from abc import abstractmethod
-from ..dynamics import actionAngleHarmonic, actionAngleHarmonicInverse
+from galpy.actionAngle import actionAngleHarmonic, actionAngleHarmonicInverse
 import torch
 
 '''Base class for mapping models.'''
@@ -37,19 +37,24 @@ class MappingModel(BaseModel):
         
         if self.input_dim == 2:
             self.omega = omega
+            # galpy's harmonic-oscillator action-angle transforms dispatch to the
+            # torch backend when handed torch tensors, returning differentiable
+            # tensors. Build the (stateless) transforms once and reuse them.
+            _aAH = actionAngleHarmonic(omega=self.omega)
+            _aAH_inv = actionAngleHarmonicInverse(omega=self.omega)
             def _toy_ps_to_aa(ps):
                 '''
                 Transform phase-space to action-angle coordinates under the toy potential.
                 '''
                 q, p = ps[..., 0], ps[..., 1]
-                j, _, theta = actionAngleHarmonic(omega=self.omega).actionsFreqsAngles(q, p)
+                j, _, theta = _aAH.actionsFreqsAngles(q, p, use_physical=False)
                 return torch.stack((theta, j), dim=-1)
             def _aa_to_toy_ps(aa):
                 '''
                 Transform action-angle to phase-space coordinates under the toy potential.
                 '''
                 theta, j = aa[..., 0], aa[..., 1]
-                q, p = actionAngleHarmonicInverse(omega=self.omega)(j, theta)
+                q, p, _ = _aAH_inv.xvFreqs(j, theta, use_physical=False)
                 return torch.stack((q, p), dim=-1)
         else: 
             raise NotImplementedError("Only 1D systems are currently supported. 2D and 3D will be added in the future.")
