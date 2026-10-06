@@ -61,6 +61,7 @@ def main(spec, out_root):
     J_train = C.j_grid(d["n_orbits"], J_lo, J_hi, omega0, d.get("spacing", "asinh"), d.get("a0", 0.03), offset=0.0)
     aa_train = C.aa_points(J_train, C.angles(d["n_steps"], 0.5))
     nO, nS = aa_train.shape[:2]
+    escale = (omega0 * J_train).reshape(-1, 1) if cfg.get("loss_norm", "toy") == "toy" else None
     ev = C.Evaluator(cfg, target, J_lo, J_hi, omega0, J_train, nS)
 
     def fresh(dtype=C.F64, device="cpu"):
@@ -102,12 +103,14 @@ def main(spec, out_root):
                        **ev.quick(as_f64(model)))
             logf.write(json.dumps(rec) + "\n"); logf.flush()
             print(f"[{cfg['name']}] {label} it={it} loss={loss:.3e} held-out={rec['eval_mean']:.3e} "
-                  f"max={rec['eval_max']:.3e} t={rec['t']/60:.1f}min", flush=True)
+                  f"max={rec['eval_max']:.3e} vs-true-E={rec['eval_mean_trueE']:.3e} "
+                  f"origin={rec['origin_image_norm']:.1e} t={rec['t']/60:.1f}min", flush=True)
 
         t_stage = time.perf_counter()
         if S["kind"] == "adam":
             save(si, 0, None)  # an interrupted Adam stage restarts from here
-            C.train_adam(model, aa_dev, target, nO, nS, S["steps"], S.get("lr", 1e-3), record, S.get("every", 100))
+            C.train_adam(model, aa_dev, target, nO, nS, S["steps"], S.get("lr", 1e-3), record, S.get("every", 100),
+                         escale=escale)
             stage_info.append(dict(stage=si, label=label, iters=S["steps"], why="done", wall=time.perf_counter() - t_stage))
         else:
             lam0 = lam if (lam is not None and it_done > 0) else S.get("lam0", 1e-3)
@@ -115,7 +118,7 @@ def main(spec, out_root):
             n, why, lam = C.train_lm(model, aa_dev, target, nO, nS, max_iters=S["max_iters"] - it_done, lam=lam0,
                                      record=record, ckpt=lambda it, l: save(si, it, l), every=S.get("every", 25),
                                      wall_cap=wall, stall_window=S.get("stall_window"), stall_rtol=S.get("stall_rtol"),
-                                     chunk_orbits=S.get("chunk_orbits", 16), it0=it_done)
+                                     chunk_orbits=S.get("chunk_orbits", 16), it0=it_done, escale=escale)
             stage_info.append(dict(stage=si, label=label, iters=it_done + n, why=why, wall=time.perf_counter() - t_stage))
         it_done, lam = 0, None
         save(si + 1, 0, None)

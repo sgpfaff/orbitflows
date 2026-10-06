@@ -11,7 +11,11 @@ Model: (theta, J) -> toy SHO ellipse with frequency omega(J) -> symplectic shear
     phase-space origin exactly (correct for reflection-symmetric potentials).
   * init: random biases (zero biases trap odd activations on symmetric data) and gates ~ N(0, gate_std)
     (all-zero gates make the identity an exact critical point of the loss).
-Loss: mean over tori of mean over angles of r^2, r = (H - <H>)/|<H>|  (least squares -> Levenberg-Marquardt).
+Loss: mean over tori of mean over angles of r^2, r = (H - <H>)/E_ref(J), least squares -> Levenberg-Marquardt.
+  E_ref = omega0*J (the fixed toy energy; parameter-independent). The older normalisation by the torus's own
+  mean energy <H> has a degenerate direction: a constant shear offset translates a torus by c, which inflates
+  <H> ~ c^2/2 while the variation grows only ~ c*p, so the relative loss -> 0 as 1/c^2 without fitting
+  anything (an LM step can jump the barrier at c ~ 1). loss_norm="mean" keeps the old behaviour.
 H is always evaluated in float64 on the CPU; the model can run in float32 on a GPU ('mixed') or float64.
 """
 
@@ -282,13 +286,14 @@ def to_host64(t):
     return t.detach().cpu().double() if t.dtype != F64 or t.device != HOST else t
 
 
-def residual_host(model, aa_dev, target, nO, nS):
-    """Per-point relative energy deviation, H in float64 on the host; differentiable through the model."""
+def residual_host(model, aa_dev, target, nO, nS, escale=None):
+    """Per-point energy deviation (H - <H>) / scale, H in float64 on the host; differentiable through the
+    model. scale = escale (nO, 1) if given (training: fixed toy energy), else |<H>| (the relative metric)."""
     y = model(aa_dev.reshape(-1, 2))
     y64 = y.cpu().double() if (y.dtype != F64 or y.device != HOST) else y
     H = target.H(y64).view(nO, nS)
     m = H.mean(1, keepdim=True)
-    return (H - m) / m.abs()
+    return (H - m) / (escale if escale is not None else m.abs())
 
 
 class Evaluator:
@@ -305,14 +310,22 @@ class Evaluator:
         self.aa_train = aa_points(train_J, angles(n_train_steps, 0.5))
         self.mw = target.name == "mw"
         self.z = zmax_kpc_of_J(self.J, target.phi) if self.mw else None
+        # exact energy of each held-out torus: quadrature for MW; omega*J for the SHO and the teacher
+        self.E_true = (E_of_J(self.J, target.phi) if self.mw else
+                       (target.omega * self.J)).reshape(-1, 1)
         self.bands = [(0.005, 0.15), (0.15, 1.0), (1.0, 9.0)]
 
     @torch.no_grad()
     def quick(self, m64):
         e = residual_host(m64, self.aa, self.target, *self.aa.shape[:2]).abs()
         et = residual_host(m64, self.aa_train, self.target, *self.aa_train.shape[:2]).abs()
+        e_true = residual_host(m64, self.aa, self.target, *self.aa.shape[:2], escale=self.E_true).abs()
+        H = self.target.H(m64(self.aa)).mean(-1, keepdim=True)
         out = dict(eval_mean=float(e.mean()), eval_max=float(e.max()), train_mean=float(et.mean()),
-                   train_max=float(et.max()))
+                   train_max=float(et.max()),
+                   eval_mean_trueE=float(e_true.mean()),  # |H - <H>| / E_true(J): cannot be gamed
+                   energy_offset_max=float((H / self.E_true - 1).abs().max()),  # ~0 unless tori are displaced
+                   origin_image_norm=float(m64.flow(torch.zeros(1, 2, dtype=F64)).norm()))
         if self.mw:
             em = e.mean(-1)
             for lo, hi in self.bands:
@@ -338,11 +351,11 @@ class Evaluator:
 
 
 # ========================================================================= trainers
-def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100):
+def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, escale=None):
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=steps, eta_min=0.0)
     for k in range(steps):
-        loss = residual_host(model, aa_dev, target, nO, nS).pow(2).mean()
+        loss = residual_host(model, aa_dev, target, nO, nS, escale).pow(2).mean()
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step(); sch.step()
@@ -351,7 +364,7 @@ def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100):
 
 
 def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ckpt=None, every=25,
-             wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0):
+             wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0, escale=None):
     """Levenberg-Marquardt on r_i / sqrt(N). Per-point Jacobians of the model outputs (vmap of jacrev) on
     the model's device/dtype, chained analytically through H (float64, host) and the per-torus mean;
     J^T J and J^T r are accumulated over chunks of tori (memory O(chunk * P + P^2)) and solved in float64.
@@ -378,7 +391,7 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
             y = to_host64(functional_call(model, unflat(v), (aa_dev.reshape(-1, 2),)))
             H = target.H(y).view(nO, nS)
             m = H.mean(1, keepdim=True)
-            return ((H - m) / m.abs() / sN).reshape(-1)
+            return ((H - m) / (escale if escale is not None else m.abs()) / sN).reshape(-1)
 
     def normal_eqs(v):
         P = v.numel()
@@ -394,8 +407,13 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
             dHdy = torch.autograd.grad(Hf.sum(), y64)[0]
             H = Hf.detach().view(k, nS)
             m = H.mean(1, keepdim=True)
-            r = ((H - m) / m.abs() / sN).reshape(-1)
-            c1 = to_dev(1 / m.abs() / sN); c2 = to_dev((H - m) * torch.sign(m) / m ** 2 / sN)
+            if escale is not None:  # fixed scale: dr = (dH - d<H>) / E_ref
+                es = escale[o0:o0 + k]
+                r = ((H - m) / es / sN).reshape(-1)
+                c1 = to_dev(1 / es / sN); c2 = torch.zeros_like(to_dev(H))
+            else:                   # relative to <H>: extra quotient-rule term
+                r = ((H - m) / m.abs() / sN).reshape(-1)
+                c1 = to_dev(1 / m.abs() / sN); c2 = to_dev((H - m) * torch.sign(m) / m ** 2 / sN)
             dH = (to_dev(dHdy)[:, :, None] * Jy).sum(1).view(k, nS, -1)
             del Jy
             dm = dH.mean(1, keepdim=True)

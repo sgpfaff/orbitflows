@@ -40,7 +40,8 @@ def stages(profile, polish_hours=60.0, stall_window=300, stall_rtol=1e-3):
 
 
 def job(name, batch, profile, model=None, toy=None, data=None, target="mw", seed=0, **kw):
-    return dict(name=name, batch=batch, target=target, seed=seed, model=dict(BASE_MODEL, **(model or {})),
+    return dict(name=name, batch=batch + "_v2", target=target, seed=seed, loss_norm="toy",
+                model=dict(BASE_MODEL, **(model or {})),
                 toy=toy or dict(mode="fixed", omega="nu0"), data=data or MW_DATA, eval=dict(n_orbits=200, n_steps=512),
                 stages=kw.pop("stages", stages(profile)), **kw)
 

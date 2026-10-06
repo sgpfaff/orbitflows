@@ -18,7 +18,9 @@ These are the defaults, all settable per job:
   - z_max from 5 pc to 8.3 kpc (J = 5.3×10⁻⁷ to 0.42 in natural units, R₀ = 8 kpc).
   - 96 tori spaced evenly in asinh(a/0.03), about 9 pc apart near the midplane, × 128 angles.
 - **Held-out set:** 200 tori at the midpoints between training tori × 512 angles offset from the training angles.
-- **Loss:** the mean over tori of mean[(H − ⟨H⟩)² / ⟨H⟩²]. H is always evaluated in float64.
+- **Loss:** the mean over tori of mean[(H − ⟨H⟩)² / E_ref²], with a fixed energy scale E_ref = ω₀J. H is always evaluated in float64.
+  - Do not normalise by the orbit's own ⟨H⟩. A constant shear offset translates a torus and inflates ⟨H⟩, which drives that relative loss to zero without fitting anything, and a large LM step finds this. `loss_norm: "mean"` restores the old behaviour for comparison.
+  - Every log point also records the error relative to the true energy E(J) (`eval_mean_trueE`, which cannot be gamed this way), the largest |⟨H⟩/E(J) − 1| over orbits, and where the origin is mapped.
 - **Training:** Adam (cosine schedule, 3000 steps), then Levenberg–Marquardt until one of these happens:
   - it converges (less than 0.1% improvement over 300 steps);
   - it can no longer descend;
@@ -74,7 +76,7 @@ rsync -av trillium:~/orbitflows/performance/precision/results/ performance/preci
 
 ## Batches
 
-| file | jobs | question |
+| file (results go to `results/<batch>_v2/`) | jobs | question |
 |---|---|---|
 | `recipe` | 12 | 3 seeds × toy {fixed ν₀, learned ω(J)} × conditioner {standard, odd}. Do learned ω and odd conditioners help? |
 | `ladder` | 9 | (A) SHO with the exact toy, (B) SHO with the wrong toy frequency, (C) teacher–student. How far does optimisation alone go? Machine precision? |
