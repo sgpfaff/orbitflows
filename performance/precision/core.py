@@ -199,20 +199,42 @@ def aa_points(J, th):
 
 # ======================================================================== the model
 class ToyMap(torch.nn.Module):
-    def __init__(self, omega0, learned=False, J_lo=1e-6, J_hi=1.0, n_cheb=6):
+    """Toy SHO ellipse with frequency nu0 (fixed) or ln omega(J) = ln nu0 + Chebyshev series in ln J (learned).
+
+    anchor (learned only) pins the series at the smallest training action J_lo, where the true frequency is
+    nu0 (to ~5e-5 at z_max = 5 pc) but the loss cannot fix the level of omega (a change of toy frequency and a
+    linear stretch of the flow are interchangeable near the midplane):
+      None          free series, k = 0..n-1
+      "value"       omega(J_lo) = nu0                 (basis T_k(s) - T_k(-1), k = 1..n-1)
+      "value_slope" omega(J_lo) = nu0, kappa(J_lo) = 0 (also - T_k'(-1)(s + 1), k = 2..n-1); with the linear
+                    continuation below J_lo this gives omega = nu0 for every smaller action
+    """
+
+    def __init__(self, omega0, learned=False, J_lo=1e-6, J_hi=1.0, n_cheb=6, anchor=None):
         super().__init__()
-        self.register_buffer("ln_w0", torch.tensor(math.log(omega0)))
+        self.register_buffer("ln_w0", torch.tensor(math.log(omega0), dtype=torch.float64))
         self.learned = learned
         self.lnJ_lo, self.lnJ_hi = math.log(J_lo), math.log(J_hi)
-        self.c = torch.nn.Parameter(torch.zeros(n_cheb)) if learned else None
+        assert anchor in (None, "value", "value_slope"), anchor
+        self.anchor = anchor
+        self.k0 = {None: 0, "value": 1, "value_slope": 2}[anchor]  # pinned modes carry no parameter
+        self.n_cheb = n_cheb
+        self.c = torch.nn.Parameter(torch.zeros(n_cheb - self.k0)) if learned else None
 
     def _series(self, s):
-        """sum_k c_k T_k(s) and its s-derivative, k = 0..n-1 (T_k' = k U_{k-1})."""
+        """sum_k c_k phi_k(s) and its s-derivative over the free modes k = k0..n-1 (T_k' = k U_{k-1})."""
         T = [torch.ones_like(s), s]; U = [torch.ones_like(s), 2 * s]
-        for _ in range(2, len(self.c)):
+        for _ in range(2, self.n_cheb):
             T.append(2 * s * T[-1] - T[-2]); U.append(2 * s * U[-1] - U[-2])
-        val = sum(self.c[k] * T[k] for k in range(len(self.c)))
-        der = sum(self.c[k] * k * U[k - 1] for k in range(1, len(self.c)))
+        val, der = 0.0, 0.0
+        for i, k in enumerate(range(self.k0, self.n_cheb)):
+            phi, dphi = T[k], (k * U[k - 1] if k else torch.zeros_like(s))
+            if self.anchor:  # T_k(-1) = (-1)^k
+                phi = phi - (-1) ** k
+            if self.anchor == "value_slope":  # T_k'(-1) = (-1)^(k+1) k^2
+                d0 = (-1) ** (k + 1) * k * k
+                phi, dphi = phi - d0 * (s + 1), dphi - d0
+            val, der = val + self.c[i] * phi, der + self.c[i] * dphi
         return val, der
 
     def ln_omega_kappa(self, J):
@@ -232,8 +254,15 @@ class ToyMap(torch.nn.Module):
         return torch.stack([torch.sqrt(2 * J / w) * torch.cos(th), -torch.sqrt(2 * J * w) * torch.sin(th)], dim=-1)
 
     def canonical_angle(self, th, J):
+        """The model's input angle is the ellipse parameter; this is the conjugate (canonical) angle."""
         _, kappa = self.ln_omega_kappa(J)
         return th - 0.5 * kappa * torch.sin(2 * th)
+
+    def angle_weights(self, J, th):
+        """d theta_c / d theta for (nO,) actions x (nS,) input angles: the weight of each sample in a torus
+        (time) average. Its mean over uniform angles is 1; identically 1 for the fixed toy."""
+        _, kappa = self.ln_omega_kappa(J)
+        return 1 - kappa[:, None] * torch.cos(2 * th)[None, :]
 
 
 class OddNNConditioner(SimpleNNConditioner):
@@ -269,7 +298,8 @@ def build_model(mcfg, toy_cfg, omega0, J_lo, J_hi, seed, dtype=F64, device=HOST)
         for n, p in flow.named_parameters():
             if n.endswith("gate"):
                 p.copy_(gs * torch.randn(p.shape, generator=g))
-    toy = ToyMap(omega0, toy_cfg.get("mode", "fixed") == "learned", J_lo, J_hi, toy_cfg.get("n_cheb", 6))
+    toy = ToyMap(omega0, toy_cfg.get("mode", "fixed") == "learned", J_lo, J_hi, toy_cfg.get("n_cheb", 6),
+                 toy_cfg.get("anchor"))
     return AAMap(toy, flow).to(dtype).to(device)
 
 
@@ -342,7 +372,9 @@ class Evaluator:
             out["origin_image"] = m64.flow(torch.zeros(1, 2, dtype=F64))[0].tolist()
         if isinstance(self.target, (MWVertical, SHO)):
             J = self.J[:: max(1, len(self.J) // n_af)].clone().requires_grad_(True)
-            Hm = self.target.H(m64(aa_points(J, angles(512, 0.25)))).mean(-1)
+            th = angles(512, 0.25)
+            # torus mean in the canonical angle (a time average); differs from the plain mean for a learned toy
+            Hm = (m64.toy.angle_weights(J, th) * self.target.H(m64(aa_points(J, th)))).mean(-1)
             dEdJ = torch.autograd.grad(Hm.sum(), J)[0]
             Jt, Om = true_action_freq(Hm.detach(), self.target.phi)
             out["action_freq"] = dict(J=J.detach().tolist(), rel_action_err=((J.detach() - Jt) / Jt).abs().tolist(),

@@ -1,7 +1,8 @@
 """Run (or resume) one job:  python run.py jobs/<batch>.jsonl --line K [--out results]
 
 Job directory <out>/<batch>/<name>/ holds
-  state.pt    float64 weights + position (stage, iterations done, LM damping, cumulative wall time);
+  state.pt    float64 weights + position (stage, iterations done, LM damping, cumulative wall time and
+              wall time spent in the current stage, so a stage's wall_hours cap counts across resumes);
               written atomically at every stage boundary and every `every` LM steps
   log.jsonl   one record per log point (held-out / training errors, z_max bands)
   result.json final metrics (per-torus errors, z_max, action/frequency errors, origin image)
@@ -75,12 +76,13 @@ def main(spec, out_root):
         print(f"resuming {cfg['name']} at stage {st['stage']} it {st['it']} (wall so far {st['t_total']/3600:.2f} h)")
     stage0, it_done, lam = (st["stage"], st["it"], st.get("lam")) if st else (0, 0, None)
     t_off = st["t_total"] if st else 0.0
+    stage_t0 = st.get("stage_t", 0.0) if st else 0.0  # wall time already spent in the stage being resumed
     stage_info = st.get("stage_info", []) if st else []
     logf = open(os.path.join(jdir, "log.jsonl"), "a")
     t_now = lambda: t_off + time.perf_counter() - t_session
 
-    def save(stage, it, lam_):
-        atomic_save(dict(state=C.state_f64(model), stage=stage, it=it, lam=lam_, t_total=t_now(),
+    def save(stage, it, lam_, stage_t=0.0):
+        atomic_save(dict(state=C.state_f64(model), stage=stage, it=it, lam=lam_, t_total=t_now(), stage_t=stage_t,
                          stage_info=stage_info), st_path)
 
     def as_f64(m):
@@ -107,19 +109,22 @@ def main(spec, out_root):
                   f"origin={rec['origin_image_norm']:.1e} t={rec['t']/60:.1f}min", flush=True)
 
         t_stage = time.perf_counter()
+        stage_off = stage_t0 if si == stage0 else 0.0
+        stage_wall = lambda: stage_off + time.perf_counter() - t_stage
         if S["kind"] == "adam":
             save(si, 0, None)  # an interrupted Adam stage restarts from here
             C.train_adam(model, aa_dev, target, nO, nS, S["steps"], S.get("lr", 1e-3), record, S.get("every", 100),
                          escale=escale)
-            stage_info.append(dict(stage=si, label=label, iters=S["steps"], why="done", wall=time.perf_counter() - t_stage))
+            stage_info.append(dict(stage=si, label=label, iters=S["steps"], why="done", wall=stage_wall()))
         else:
             lam0 = lam if (lam is not None and it_done > 0) else S.get("lam0", 1e-3)
-            wall = S.get("wall_hours"); wall = wall * 3600 if wall else None
+            wall = S.get("wall_hours")
+            wall = max(wall * 3600 - stage_off, 1e-9) if wall else None  # what is left of the stage's cap
             n, why, lam = C.train_lm(model, aa_dev, target, nO, nS, max_iters=S["max_iters"] - it_done, lam=lam0,
-                                     record=record, ckpt=lambda it, l: save(si, it, l), every=S.get("every", 25),
+                                     record=record, ckpt=lambda it, l: save(si, it, l, stage_wall()), every=S.get("every", 25),
                                      wall_cap=wall, stall_window=S.get("stall_window"), stall_rtol=S.get("stall_rtol"),
                                      chunk_orbits=S.get("chunk_orbits", 16), it0=it_done, escale=escale)
-            stage_info.append(dict(stage=si, label=label, iters=it_done + n, why=why, wall=time.perf_counter() - t_stage))
+            stage_info.append(dict(stage=si, label=label, iters=it_done + n, why=why, wall=stage_wall()))
         it_done, lam = 0, None
         save(si + 1, 0, None)
 

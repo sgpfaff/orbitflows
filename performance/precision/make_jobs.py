@@ -11,6 +11,10 @@ Batches
              conditioner {standard, odd}  -> 12 jobs. Settles learned omega and odd conditioners with error bars.
   capacity : layers {4, 8, 16, 32, 64} x width {16, 32, 64} x 3 seeds -> 45 jobs (<= 12.4k parameters, so
              the LM normal equations stay <= ~1.2 GB). Use the recipe winner via --toy / --odd.
+  anchor   : learned omega(J) pinned to nu0 at the smallest training action (value, or value and slope),
+             standard conditioners, 3 seeds -> 6 jobs. The recipe batch found learned omega best above ~1 kpc but
+             ~10x worse near the midplane, where omega drifted to ~1.2 instead of nu0; this tests the fix.
+             LM wall cap 68 h, to fit one 72 h Trillium OnDemand session.
   ladder   : (A) SHO with the exact toy: the answer is the identity, which the flow represents exactly;
              (B) SHO with a wrong toy frequency: the answer is a linear rescaling, which tanh shears reach
                  only in a limit (small inner weights, large outer ones);
@@ -60,6 +64,11 @@ def main():
         job(f"rec_{toy}_{'odd' if odd else 'std'}_s{s}", "recipe", p, model=dict(odd=odd),
             toy=dict(mode=toy, omega="nu0", n_cheb=6), seed=s)
         for toy in ("fixed", "learned") for odd in (False, True) for s in range(3)]
+
+    batches["anchor"] = [
+        job(f"anc_{tag}_s{s}", "anchor", p, toy=dict(mode="learned", omega="nu0", n_cheb=6, anchor=anc), seed=s,
+            stages=stages(p, polish_hours=68.0))
+        for anc, tag in (("value", "val"), ("value_slope", "vs")) for s in range(3)]
 
     toy = dict(mode=a.toy, omega="nu0", n_cheb=6)
     batches["capacity"] = [

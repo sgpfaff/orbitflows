@@ -13,7 +13,8 @@ These are the defaults, all settable per job:
   - Optional *odd* conditioners, f(x) = [g(x) − g(−x)]/2, which fix the phase-space origin exactly.
 - **Toy map:**
   - `fixed` uses frequency ν₀ = √Φ″(0), which is exact as J → 0.
-  - `learned` uses ln ω(J) = ln ν₀ + a Chebyshev series in ln J. It stays exactly canonical through the angle correction θ_c = θ − (κ/2) sin 2θ, with κ = d ln ω / d ln J.
+  - `learned` uses ln ω(J) = ln ν₀ + a Chebyshev series in ln J. The network's input angle θ is the ellipse parameter; the conjugate angle is θ_c = θ − (κ/2) sin 2θ, with κ = d ln ω / d ln J, and (θ_c, J) → (q, p) is exactly canonical. Torus averages in the evaluator are taken in θ_c, weighting each sample by 1 − κ cos 2θ.
+  - `anchor` (learned only) pins the series at the smallest training action, where the true frequency is ν₀: `"value"` sets ω(J_lo) = ν₀, and `"value_slope"` also sets κ(J_lo) = 0, so ω = ν₀ for every smaller action. Without it, ω drifts near the midplane, because there a change of toy frequency and a linear stretch of the flow are interchangeable.
 - **Data:**
   - z_max from 5 pc to 8.3 kpc (J = 5.3×10⁻⁷ to 0.42 in natural units, R₀ = 8 kpc).
   - 96 tori spaced evenly in asinh(a/0.03), about 9 pc apart near the midplane, × 128 angles.
@@ -24,7 +25,7 @@ These are the defaults, all settable per job:
 - **Training:** Adam (cosine schedule, 3000 steps), then Levenberg–Marquardt until one of these happens:
   - it converges (less than 0.1% improvement over 300 steps);
   - it can no longer descend;
-  - it reaches `wall_hours`.
+  - it reaches `wall_hours` of LM time, counted across resumes.
 
 ## Setup (once per machine)
 
@@ -78,7 +79,8 @@ rsync -av trillium:~/orbitflows/performance/precision/results/ performance/preci
 
 | file (results go to `results/<batch>_v2/`) | jobs | question |
 |---|---|---|
-| `recipe` | 12 | 3 seeds × toy {fixed ν₀, learned ω(J)} × conditioner {standard, odd}. Do learned ω and odd conditioners help? |
+| `recipe` | 12 | 3 seeds × toy {fixed ν₀, learned ω(J)} × conditioner {standard, odd}. Do learned ω and odd conditioners help? (Done, Oct 2026: learned ω wins above ~1 kpc and loses ~10× near the midplane; odd conditioners hurt.) |
+| `anchor` | 6 | Learned ω(J) anchored to ν₀ at the smallest action (`value`, `value_slope`) × 3 seeds, standard conditioners, 68 h LM cap. Does the anchor keep the fixed toy's accuracy near the midplane together with the learned toy's in the outer disc? |
 | `ladder` | 9 | (A) SHO with the exact toy, (B) SHO with the wrong toy frequency, (C) teacher–student. How far does optimisation alone go? Machine precision? |
 | `capacity` | 45 | layers {4…64} × width {16, 32, 64} × 3 seeds (≤ 12.4k parameters). Error vs model size, each run converged. Regenerate with the recipe winner: `make_jobs.py --toy learned --odd`. |
 
