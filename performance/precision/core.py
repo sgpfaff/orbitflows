@@ -75,11 +75,28 @@ class SHO:
 
 
 class Teacher:
-    """Realisable target H_T(x) = H_toy(T^-1(x)) for a fixed random shear flow T (zero approximation
-    error for a student containing T's architecture). No separable potential: energy metrics only."""
+    """Realisable target H_T(x) = H_toy(T^-1(x)) for a fixed shear flow T (zero approximation error for a
+    student containing T's architecture). No separable potential: energy metrics only.
+
+    T is either a random flow (n_layers, width, gate, seed), or a trained model's flow loaded from
+    `checkpoint` (a file written by save_teacher, path relative to this directory). The second gives a
+    realisable target with the complexity of a real problem: e.g. the best MW model, whose tori are within
+    ~1e-5 of the MW potential's, so a student of the same architecture and toy can fit it exactly."""
     name = "teacher"
 
-    def __init__(self, omega=1.5, n_layers=4, width=16, gate=0.25, seed=123):
+    def __init__(self, omega=1.5, n_layers=4, width=16, gate=0.25, seed=123, checkpoint=None):
+        if checkpoint is not None:
+            ck = torch.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), checkpoint), weights_only=False)
+            mc = ck["model"]
+            cond = OddNNConditioner if mc.get("odd", False) else SimpleNNConditioner
+            self.T = Flow(2, mc["n_layers"], SymplecticCouplingLayer, cond,
+                          dict(num_layers=mc.get("depth", 2), projection_dims=mc["width"],
+                               activation=ACTS[mc.get("act", "tanh")], include_bias=True)).to(F64)
+            self.T.load_state_dict(ck["flow_state"])
+            for p in self.T.parameters():
+                p.requires_grad_(False)
+            self.omega = self.nu0 = float(ck["omega"])
+            return
         torch.manual_seed(seed)
         self.T = Flow(2, n_layers, SymplecticCouplingLayer, SimpleNNConditioner,
                       dict(num_layers=2, projection_dims=width, activation=torch.nn.Tanh, include_bias=True)).to(F64)
@@ -99,6 +116,17 @@ class Teacher:
     def H(self, ps):
         z = self.T.inverse(ps)
         return 0.5 * z[..., 1] ** 2 + 0.5 * (self.omega * z[..., 0]) ** 2
+
+
+def save_teacher(job_dir, out_path):
+    """Freeze a finished fixed-toy job (config.json + state.pt) as a teacher file for Teacher(checkpoint=...)."""
+    cfg = json.load(open(os.path.join(job_dir, "config.json")))
+    assert cfg["toy"].get("mode", "fixed") == "fixed", "a teacher needs a fixed toy frequency"
+    st = torch.load(os.path.join(job_dir, "state.pt"), weights_only=False)["state"]
+    flow_state = {k[len("flow."):]: v.to(F64) for k, v in st.items() if k.startswith("flow.")}
+    omega = float(st["toy.ln_w0"].double().exp())  # exactly the frequency the teacher was trained with
+    torch.save(dict(model=cfg["model"], omega=omega, flow_state=flow_state, source=cfg["name"]), out_path)
+    return omega
 
 
 def make_target(cfg):
@@ -339,7 +367,8 @@ class Evaluator:
         self.aa = aa_points(self.J, self.th)
         self.aa_train = aa_points(train_J, angles(n_train_steps, 0.5))
         self.mw = target.name == "mw"
-        self.z = zmax_kpc_of_J(self.J, target.phi) if self.mw else None
+        self.mw_range = "zmin_pc" in d  # tori labelled by MW z_max (MW itself, or a teacher made from an MW model)
+        self.z = zmax_kpc_of_J(self.J, (target if self.mw else MWVertical()).phi) if self.mw_range else None
         # exact energy of each held-out torus: quadrature for MW; omega*J for the SHO and the teacher
         self.E_true = (E_of_J(self.J, target.phi) if self.mw else
                        (target.omega * self.J)).reshape(-1, 1)
@@ -356,7 +385,7 @@ class Evaluator:
                    eval_mean_trueE=float(e_true.mean()),  # |H - <H>| / E_true(J): cannot be gamed
                    energy_offset_max=float((H / self.E_true - 1).abs().max()),  # ~0 unless tori are displaced
                    origin_image_norm=float(m64.flow(torch.zeros(1, 2, dtype=F64)).norm()))
-        if self.mw:
+        if self.mw_range:
             em = e.mean(-1)
             for lo, hi in self.bands:
                 sel = (self.z >= lo * 0.999) & (self.z <= hi)
@@ -368,7 +397,7 @@ class Evaluator:
         with torch.no_grad():
             e = residual_host(m64, self.aa, self.target, *self.aa.shape[:2]).abs()
             out.update(per_torus=dict(J=self.J.tolist(), mean=e.mean(-1).tolist(), max=e.max(-1).values.tolist(),
-                                      z_kpc=self.z.tolist() if self.mw else None))
+                                      z_kpc=self.z.tolist() if self.mw_range else None))
             out["origin_image"] = m64.flow(torch.zeros(1, 2, dtype=F64))[0].tolist()
         if isinstance(self.target, (MWVertical, SHO)):
             J = self.J[:: max(1, len(self.J) // n_af)].clone().requires_grad_(True)
@@ -396,11 +425,19 @@ def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, esca
 
 
 def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ckpt=None, every=25,
-             wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0, escale=None):
+             wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0, escale=None,
+             geodesic=False, geo_h=0.1, geo_alpha=0.75):
     """Levenberg-Marquardt on r_i / sqrt(N). Per-point Jacobians of the model outputs (vmap of jacrev) on
     the model's device/dtype, chained analytically through H (float64, host) and the per-torus mean;
     J^T J and J^T r are accumulated over chunks of tori (memory O(chunk * P + P^2)) and solved in float64.
-    Every step is accepted only if the float64 loss decreases. Returns (iterations done, stop reason, lam)."""
+    Every step is accepted only if the float64 loss decreases. Returns (iterations done, stop reason, lam).
+
+    geodesic: add the geodesic-acceleration correction of Transtrum & Sethna (2012), aimed at sloppy problems
+    whose LM steps are limited by curvature of the residual manifold. With the LM step d, the second
+    directional derivative r_dd ~ (2/h)[(r(v + h d) - r(v))/h - J d] gives a = -(J^T J + lam D)^-1 J^T r_dd,
+    and the step becomes d + a/2 when 2|a|_D/|d|_D <= geo_alpha. If the correction is too large, or the corrected
+    step does not lower the loss, the plain step d is tried before lam is raised, so a geodesic step is never
+    worse than a plain one. Costs one or two extra residual evaluations and one vector-Jacobian product per trial."""
     from torch.func import functional_call, jacrev, vmap
     dev, dt = next(model.parameters()).device, next(model.parameters()).dtype
     names = [n for n, _ in model.named_parameters()]
@@ -415,8 +452,8 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
             out[n] = v[i:i + k].view(s_); i += k
         return out
 
-    def f_point(v, x):
-        return functional_call(model, unflat(v), (x[None, :],))[0]
+    def f_point(p, x):
+        return functional_call(model, p, (x[None, :],))[0]
 
     def resid(v):
         with torch.no_grad():
@@ -425,13 +462,26 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
             m = H.mean(1, keepdim=True)
             return ((H - m) / (escale if escale is not None else m.abs()) / sN).reshape(-1)
 
+    def jtv(v, u):
+        """J^T u for the residual Jacobian at v (one backward pass)."""
+        vv = v.detach().clone().requires_grad_(True)
+        y = to_host64(functional_call(model, unflat(vv), (aa_dev.reshape(-1, 2),)))
+        H = target.H(y).view(nO, nS)
+        m = H.mean(1, keepdim=True)
+        r = ((H - m) / (escale if escale is not None else m.abs()) / sN).reshape(-1)
+        return to_host64(torch.autograd.grad(r, vv, grad_outputs=u.to(r.dtype))[0])
+
     def normal_eqs(v):
         P = v.numel()
         A = torch.zeros(P, P, dtype=dt, device=dev); g = torch.zeros(P, dtype=dt, device=dev); rs = []
         for o0 in range(0, nO, chunk_orbits):
             sl = aa_dev[o0:o0 + chunk_orbits]; k = sl.shape[0]
             x = sl.reshape(-1, 2)
-            Jy = vmap(jacrev(f_point), in_dims=(None, 0))(v, x)  # (k*nS, 2, P)
+            # Jacobian w.r.t. the parameter dict, then concatenated: identical to differentiating w.r.t. the
+            # flat vector v, but ~20x cheaper (slicing v makes every per-point backward build a dense (n, P) array)
+            Jd = vmap(jacrev(f_point), in_dims=(None, 0))(unflat(v), x)
+            Jy = torch.cat([Jd[n].reshape(x.shape[0], 2, -1) for n in names], -1)  # (k*nS, 2, P)
+            del Jd
             with torch.no_grad():
                 y = functional_call(model, unflat(v), (x,))
             y64 = to_host64(y).requires_grad_(True)
@@ -466,10 +516,23 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
             L, info = torch.linalg.cholesky_ex(A + lam * torch.diag(dg + 1e-12 * dg.max()))
             if int(info) != 0:
                 lam *= 10; continue
-            vn = v + to_dev(-torch.cholesky_solve(g[:, None], L)[:, 0])
-            fn = 0.5 * float(resid(vn).pow(2).sum())
-            if math.isfinite(fn) and fn < f:
-                v, f, accepted = vn, fn, True
+            d = -torch.cholesky_solve(g[:, None], L)[:, 0]
+            trials = [d]
+            if geodesic:
+                Jd = A @ d  # J^T J d
+                Jt_rdd = (2 / geo_h) * ((jtv(v, resid(v + to_dev(geo_h * d))) - g) / geo_h - Jd)
+                a = -torch.cholesky_solve(Jt_rdd[:, None], L)[:, 0]
+                # use the corrected step only while the quadratic correction is small next to the step;
+                # otherwise (and if it fails to descend) fall back to the plain LM step before raising lam
+                if 2 * float((dg * a * a).sum().sqrt()) <= geo_alpha * float((dg * d * d).sum().sqrt()):
+                    trials = [d + 0.5 * a, d]
+            for dd in trials:
+                vn = v + to_dev(dd)
+                fn = 0.5 * float(resid(vn).pow(2).sum())
+                if math.isfinite(fn) and fn < f:
+                    v, f, accepted = vn, fn, True
+                    break
+            if accepted:
                 lam = max(lam / 3, 1e-15)
                 break
             lam *= 4

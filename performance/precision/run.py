@@ -52,9 +52,10 @@ def main(spec, out_root):
 
     target = C.make_target(cfg)
     d = cfg["data"]
-    if target.name == "mw":
-        J_lo = float(C.J_of_zmax(d["zmin_pc"] / 1000 / C.RO_KPC, target.phi)[0])
-        J_hi = float(C.J_of_zmax(d["zmax_kpc"] / C.RO_KPC, target.phi)[0])
+    if "zmin_pc" in d:  # an MW z_max range (MW itself, or a teacher made from an MW model)
+        phi = (target if target.name == "mw" else C.MWVertical()).phi
+        J_lo = float(C.J_of_zmax(d["zmin_pc"] / 1000 / C.RO_KPC, phi)[0])
+        J_hi = float(C.J_of_zmax(d["zmax_kpc"] / C.RO_KPC, phi)[0])
     else:
         J_lo, J_hi = d["J_lo"], d["J_hi"]
     tw = cfg["toy"].get("omega", "nu0")
@@ -123,7 +124,8 @@ def main(spec, out_root):
             n, why, lam = C.train_lm(model, aa_dev, target, nO, nS, max_iters=S["max_iters"] - it_done, lam=lam0,
                                      record=record, ckpt=lambda it, l: save(si, it, l, stage_wall()), every=S.get("every", 25),
                                      wall_cap=wall, stall_window=S.get("stall_window"), stall_rtol=S.get("stall_rtol"),
-                                     chunk_orbits=S.get("chunk_orbits", 16), it0=it_done, escale=escale)
+                                     chunk_orbits=S.get("chunk_orbits", 16), it0=it_done, escale=escale,
+                                     geodesic=S.get("geodesic", False))
             stage_info.append(dict(stage=si, label=label, iters=it_done + n, why=why, wall=stage_wall()))
         it_done, lam = 0, None
         save(si + 1, 0, None)
