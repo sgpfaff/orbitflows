@@ -354,9 +354,31 @@ def residual_host(model, aa_dev, target, nO, nS, escale=None):
     return (H - m) / (escale if escale is not None else m.abs())
 
 
+PCTS = {"p90": 0.90, "p99": 0.99, "p999": 0.999}
+
+
+def torus_stats(e, w=None):
+    """Per-torus mean, max and percentiles of the per-angle errors e (n_tori, n_angles) along each orbit.
+    w: per-sample weights (dtheta_c/dtheta for a learned toy, so the statistics are time averages), or None.
+    The p-th percentile is the error the orbit spends a fraction p of its time below."""
+    if w is None:
+        w = torch.ones_like(e)
+    w = w / w.sum(-1, keepdim=True)
+    es, idx = e.sort(-1)
+    cw = w.gather(-1, idx).cumsum(-1)
+    q = {}
+    for name, p in PCTS.items():
+        k = torch.searchsorted(cw, torch.full((e.shape[0], 1), p, dtype=cw.dtype)).clamp(max=e.shape[1] - 1)
+        q[name] = es.gather(-1, k).squeeze(-1)
+    return (w * e).sum(-1), e.max(-1).values, q
+
+
 class Evaluator:
     """Held-out tori (midpoints between training tori, angles offset from training angles), training
-    tori, z_max bands for MW, torus-mean action / frequency errors and the image of the origin."""
+    tori, z_max bands for MW, torus-mean action / frequency errors and the image of the origin.
+    Percentiles along each orbit use the same held-out tori at 4096 angles (the top 0.1% of an orbit is then
+    ~4 samples; with the smooth per-angle errors this is converged to <1%); eval_p90/p99/p999 are their
+    means over tori. The logged eval_mean / eval_max keep the 512-angle grid of earlier runs."""
 
     def __init__(self, cfg, target, J_lo, J_hi, omega_ref, train_J, n_train_steps):
         d, e = cfg["data"], cfg.get("eval", {})
@@ -365,6 +387,7 @@ class Evaluator:
                         offset=0.5)
         self.th = angles(e.get("n_steps", 512), offset=0.25)
         self.aa = aa_points(self.J, self.th)
+        self.th_pct = angles(e.get("n_steps_pct", 4096), offset=0.25)
         self.aa_train = aa_points(train_J, angles(n_train_steps, 0.5))
         self.mw = target.name == "mw"
         self.mw_range = "zmin_pc" in d  # tori labelled by MW z_max (MW itself, or a teacher made from an MW model)
@@ -373,6 +396,19 @@ class Evaluator:
         self.E_true = (E_of_J(self.J, target.phi) if self.mw else
                        (target.omega * self.J)).reshape(-1, 1)
         self.bands = [(0.005, 0.15), (0.15, 1.0), (1.0, 9.0)]
+
+    @torch.no_grad()
+    def orbit_stats(self, m64, chunk=25):
+        """Per-torus mean, max and percentiles along each held-out orbit, at the fine angle grid."""
+        em, ex, q = [], [], {}
+        for i in range(0, len(self.J), chunk):
+            Jc = self.J[i:i + chunk]
+            e = residual_host(m64, aa_points(Jc, self.th_pct), self.target, len(Jc), len(self.th_pct)).abs()
+            m_, x_, q_ = torus_stats(e, m64.toy.angle_weights(Jc, self.th_pct))
+            em.append(m_); ex.append(x_)
+            for k, v in q_.items():
+                q.setdefault(k, []).append(v)
+        return torch.cat(em), torch.cat(ex), {k: torch.cat(v) for k, v in q.items()}
 
     @torch.no_grad()
     def quick(self, m64):
@@ -385,6 +421,8 @@ class Evaluator:
                    eval_mean_trueE=float(e_true.mean()),  # |H - <H>| / E_true(J): cannot be gamed
                    energy_offset_max=float((H / self.E_true - 1).abs().max()),  # ~0 unless tori are displaced
                    origin_image_norm=float(m64.flow(torch.zeros(1, 2, dtype=F64)).norm()))
+        _, _, q = self.orbit_stats(m64)
+        out.update({f"eval_{k}": float(v.mean()) for k, v in q.items()})  # mean over tori of each orbit's percentile
         if self.mw_range:
             em = e.mean(-1)
             for lo, hi in self.bands:
@@ -395,8 +433,9 @@ class Evaluator:
     def full(self, m64, n_af=60):
         out = self.quick(m64)
         with torch.no_grad():
-            e = residual_host(m64, self.aa, self.target, *self.aa.shape[:2]).abs()
-            out.update(per_torus=dict(J=self.J.tolist(), mean=e.mean(-1).tolist(), max=e.max(-1).values.tolist(),
+            em, ex, q = self.orbit_stats(m64)  # all five statistics from the same fine angle grid
+            out.update(per_torus=dict(J=self.J.tolist(), mean=em.tolist(), max=ex.tolist(),
+                                      **{k: v.tolist() for k, v in q.items()}, n_angles=len(self.th_pct),
                                       z_kpc=self.z.tolist() if self.mw_range else None))
             out["origin_image"] = m64.flow(torch.zeros(1, 2, dtype=F64))[0].tolist()
         if isinstance(self.target, (MWVertical, SHO)):

@@ -21,6 +21,7 @@ These are the defaults, all settable per job:
 - **Held-out set:** 200 tori at the midpoints between training tori × 512 angles offset from the training angles.
 - **Loss:** the mean over tori of mean[(H − ⟨H⟩)² / E_ref²], with a fixed energy scale E_ref = ω₀J. H is always evaluated in float64.
   - Do not normalise by the orbit's own ⟨H⟩. A constant shear offset translates a torus and inflates ⟨H⟩, which drives that relative loss to zero without fitting anything, and a large LM step finds this. `loss_norm: "mean"` restores the old behaviour for comparison.
+  - Every log point also records percentiles of the error along each orbit (`eval_p90`, `eval_p99`, `eval_p999`: the error each held-out orbit spends 90 / 99 / 99.9% of its time below, at 4,096 angles, averaged over orbits); `result.json` stores them per torus with the mean and max.
   - Every log point also records the error relative to the true energy E(J) (`eval_mean_trueE`, which cannot be gamed this way), the largest |⟨H⟩/E(J) − 1| over orbits, and where the origin is mapped.
 - **Training:** Adam (cosine schedule, 3000 steps), then Levenberg–Marquardt (optionally with geodesic acceleration, `"geodesic": true` in the LM stage) until one of these happens:
   - it converges (less than 0.1% improvement over 300 steps);
