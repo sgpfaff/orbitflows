@@ -451,20 +451,21 @@ def train_adam(model, aa, target, steps, lr, escale, record=None, every=100):
             record(k, float(loss))
 
 
-def lm_residual_system(model, aa, target, escale, iscale=None, beta=0.0, chunk=4):
-    """Build f(v) -> r (stacked residual vector) and normal_eqs(v) -> (r, J^T r, J^T J) for the combined loss
-    mean r_E^2 + beta * mean |R/iscale|^2 (energy and invariance residuals), both scaled by 1/sqrt(N points).
+def lm_residual_system(model, aa, target, escale, iscale=None, beta=0.0, chunk=4, inv_angles=None):
+    """Build (unflat, resid, normal_eqs) for the combined loss mean r_E^2 + beta * mean |R/iscale|^2.
 
-    Per-point Jacobians of y = (z, dz/dtheta) w.r.t. the parameter dict by vmap(jacrev) (reverse over forward);
-    then chained analytically: dH = grad H . dz; for the invariance residual R_s = X_H(z_s) - Z_s Omega with the
-    per-torus least-squares Omega = G^-1 b (G = sum Z^T Z, b = sum Z^T X):
-        dX = (dv, -Hess Phi dx),  dOmega = G^-1 sum_s [dZ_s^T R_s + Z_s^T (dX_s - dZ_s Omega)],
-        dR_s = dX_s - dZ_s Omega - Z_s dOmega."""
+    Energy rows: every training point, Jacobian of z only (as in train_lm). Invariance rows: the first
+    `inv_angles` angles of each torus (all if None), where y = (z, dz/dtheta) and its Jacobian are needed. Both
+    are scaled by 1/sqrt(points used). Per-point Jacobians by vmap(jacrev) w.r.t. the parameter dict, chained
+    analytically: dH = grad H . dz; for R_s = X_H(z_s) - Z_s Omega with the per-torus least-squares Omega = G^-1 b
+    (G = sum Z^T Z, b = sum Z^T X):  dX = (dv, -Hess Phi dx),  dOmega = G^-1 sum_s [dZ_s^T R_s + Z_s^T (dX_s -
+    dZ_s Omega)],  dR_s = dX_s - dZ_s Omega - Z_s dOmega.  Rows are ordered by chunk: [energy rows, invariance rows]."""
     from torch.func import functional_call, jacrev, vmap, jvp, hessian
     names = [n for n, _ in model.named_parameters()]
     shapes = [p.shape for _, p in model.named_parameters()]
     sizes = [p.numel() for _, p in model.named_parameters()]
-    nO, nS = aa.shape[:2]; N = nO * nS; sN = math.sqrt(N); sb = math.sqrt(beta)
+    nO, nS = aa.shape[:2]; nI = nS if inv_angles is None else min(inv_angles, nS)
+    sNE, sNI = math.sqrt(nO * nS), math.sqrt(nO * nI); sb = math.sqrt(beta)
     E3 = torch.eye(3, dtype=F64)
 
     def unflat(v):
@@ -473,80 +474,84 @@ def lm_residual_system(model, aa, target, escale, iscale=None, beta=0.0, chunk=4
             out[n] = v[i:i + k].view(s_); i += k
         return out
 
+    def z_point(p, x):
+        return functional_call(model, p, (x[None],))[0]
+
     def y_point(p, x):  # z and dz/dtheta for one point
         f = lambda xx: functional_call(model, p, (xx[None],))[0]
-        z = f(x)
         Z = torch.stack([jvp(f, (x,), (torch.cat([E3[i], torch.zeros(3, dtype=F64)]),))[1] for i in range(3)], -1)
-        return torch.cat([z, Z.reshape(-1)])
+        return torch.cat([f(x), Z.reshape(-1)])
 
-    def resid_from(z, Z, o0, k):
-        H = target.H(z).view(k, nS)
-        rE = ((H - H.mean(1, keepdim=True)) / escale[o0:o0 + k] / sN).reshape(-1)
-        if not beta:
-            return rE
-        X = torch.cat([z[:, 3:], -vmap(torch.func.grad(lambda xx: target.pot(xx)))(z[:, :3])], -1).view(k, nS, 6)
-        Zt = Z.view(k, nS, 6, 3)
-        Om = torch.linalg.solve(torch.einsum("tsai,tsaj->tij", Zt, Zt), torch.einsum("tsai,tsa->ti", Zt, X)[..., None])[..., 0]
-        R = (X - torch.einsum("tsai,ti->tsa", Zt, Om)) / iscale[o0:o0 + k]
-        return torch.cat([rE, sb * R.reshape(-1) / sN])
+    def pot_grad(x3):
+        return vmap(torch.func.grad(lambda xx: target.pot(xx)))(x3)
 
-    def resid(v, graph=False):
+    def inv_parts(z, Z, k, o0):
+        X = torch.cat([z[:, 3:], -pot_grad(z[:, :3])], -1).view(k, nI, 6); Zt = Z.view(k, nI, 6, 3)
+        G = torch.einsum("tsai,tsaj->tij", Zt, Zt)
+        Om = torch.linalg.solve(G, torch.einsum("tsai,tsa->ti", Zt, X)[..., None])[..., 0]
+        R = X - torch.einsum("tsai,ti->tsa", Zt, Om)
+        return X, Zt, G, Om, R
+
+    def resid(v):
         pd = unflat(v); out = []
-        ctx = torch.enable_grad() if graph else torch.no_grad()
-        for o0 in range(0, nO, chunk):  # same chunks, so the same row order, as normal_eqs
-            x = aa[o0:o0 + chunk].reshape(-1, 6); k = x.shape[0] // nS
-            if beta:
-                y = vmap(y_point, in_dims=(None, 0))(pd, x) if graph else torch.func.vmap(y_point, in_dims=(None, 0))(pd, x)
-                z, Z = y[:, :6], y[:, 6:].reshape(-1, 6, 3)
-            else:
-                with ctx:
-                    z = functional_call(model, pd, (x,)); Z = None
-            out.append(resid_from(z, Z, o0, k))
+        with torch.no_grad():
+            for o0 in range(0, nO, chunk):
+                sl = aa[o0:o0 + chunk]; k = sl.shape[0]
+                H = target.H(functional_call(model, pd, (sl.reshape(-1, 6),))).view(k, nS)
+                out.append(((H - H.mean(1, keepdim=True)) / escale[o0:o0 + k] / sNE).reshape(-1))
+                if beta:
+                    y = vmap(y_point, in_dims=(None, 0))(pd, sl[:, :nI].reshape(-1, 6))
+                    *_, R = inv_parts(y[:, :6], y[:, 6:].reshape(-1, 6, 3), k, o0)
+                    out.append((sb * R / iscale[o0:o0 + k] / sNI).reshape(-1))
         return torch.cat(out)
 
     def normal_eqs(v):
         P = v.numel(); A = torch.zeros(P, P, dtype=F64); g = torch.zeros(P, dtype=F64); rs = []
         pd = unflat(v)
         for o0 in range(0, nO, chunk):
-            x = aa[o0:o0 + chunk].reshape(-1, 6); k = x.shape[0] // nS
-            Jd = vmap(jacrev(y_point), in_dims=(None, 0))(pd, x)
-            Jy = torch.cat([Jd[n].reshape(x.shape[0], 24, -1) for n in names], -1); del Jd
+            sl = aa[o0:o0 + chunk]; k = sl.shape[0]
+            # energy rows: all angles, Jacobian of z only
+            x = sl.reshape(-1, 6)
+            Jd = vmap(jacrev(z_point), in_dims=(None, 0))(pd, x)
+            dz = torch.cat([Jd[n].reshape(x.shape[0], 6, -1) for n in names], -1); del Jd
             with torch.no_grad():
-                y = vmap(y_point, in_dims=(None, 0))(pd, x)
-            z, Z = y[:, :6], y[:, 6:].reshape(-1, 6, 3)
-            dz, dZ = Jy[:, :6], Jy[:, 6:].reshape(x.shape[0], 6, 3, -1); del Jy
-            # energy rows
+                z = functional_call(model, pd, (x,))
             zz = z.detach().requires_grad_(True); Hf = target.H(zz); dHdy = torch.autograd.grad(Hf.sum(), zz)[0]
             H = Hf.detach().view(k, nS); es = escale[o0:o0 + k]
-            rE = ((H - H.mean(1, keepdim=True)) / es / sN).reshape(-1)
-            dH = (dHdy[:, :, None] * dz).sum(1).view(k, nS, -1)
-            JE = ((dH - dH.mean(1, keepdim=True)) / es[..., None] / sN).reshape(k * nS, -1)
-            A += JE.T @ JE; g += JE.T @ rE; r_parts = [rE]
-            if beta:
-                x3 = z[:, :3]
-                gradPhi = vmap(torch.func.grad(lambda xx: target.pot(xx)))(x3); Hess = vmap(hessian(lambda xx: target.pot(xx)))(x3)
-                X = torch.cat([z[:, 3:], -gradPhi], -1)
-                dX = torch.cat([dz[:, 3:], -torch.einsum("nab,nbp->nap", Hess, dz[:, :3])], 1)       # (n, 6, P)
-                Xt, Zt = X.view(k, nS, 6), Z.view(k, nS, 6, 3)
-                G = torch.einsum("tsai,tsaj->tij", Zt, Zt); Om = torch.linalg.solve(G, torch.einsum("tsai,tsa->ti", Zt, Xt)[..., None])[..., 0]
-                R = Xt - torch.einsum("tsai,ti->tsa", Zt, Om)
-                dZv = dZ.view(k, nS, 6, 3, -1); dXv = dX.view(k, nS, 6, -1)
-                W = dXv - torch.einsum("tsaip,ti->tsap", dZv, Om)                                       # dX - dZ Omega
-                rhs = torch.einsum("tsaip,tsa->tip", dZv, R) + torch.einsum("tsai,tsap->tip", Zt, W)
-                dOm = torch.linalg.solve(G, rhs)                                                        # (k, 3, P)
-                dR = W - torch.einsum("tsai,tip->tsap", Zt, dOm)
-                isc = iscale[o0:o0 + k].view(k, 1, 1, 1)
-                JI = (sb * dR / isc / sN).reshape(k * nS * 6, -1); rI = (sb * R / iscale[o0:o0 + k] / sN).reshape(-1)
-                A += JI.T @ JI; g += JI.T @ rI; r_parts.append(rI)
-            rs.append(torch.cat(r_parts))
+            rE = ((H - H.mean(1, keepdim=True)) / es / sNE).reshape(-1)
+            dH = (dHdy[:, :, None] * dz).sum(1).view(k, nS, -1); del dz
+            JE = ((dH - dH.mean(1, keepdim=True)) / es[..., None] / sNE).reshape(k * nS, -1)
+            A += JE.T @ JE; g += JE.T @ rE; rs.append(rE); del JE, dH
+            if not beta:
+                continue
+            # invariance rows: the first nI angles, Jacobian of (z, dz/dtheta)
+            xi = sl[:, :nI].reshape(-1, 6); n_i = xi.shape[0]
+            Jd = vmap(jacrev(y_point), in_dims=(None, 0))(pd, xi)
+            Jy = torch.cat([Jd[n].reshape(n_i, 24, -1) for n in names], -1); del Jd
+            with torch.no_grad():
+                y = vmap(y_point, in_dims=(None, 0))(pd, xi)
+            zi, Zi = y[:, :6], y[:, 6:].reshape(-1, 6, 3)
+            dzi, dZ = Jy[:, :6], Jy[:, 6:].reshape(n_i, 6, 3, -1); del Jy
+            Hess = vmap(hessian(lambda xx: target.pot(xx)))(zi[:, :3])
+            dX = torch.cat([dzi[:, 3:], -torch.einsum("nab,nbp->nap", Hess, dzi[:, :3])], 1)
+            X, Zt, G, Om, R = inv_parts(zi, Zi, k, o0)
+            dZv = dZ.view(k, nI, 6, 3, -1); dXv = dX.view(k, nI, 6, -1)
+            W = dXv - torch.einsum("tsaip,ti->tsap", dZv, Om)
+            rhs = torch.einsum("tsaip,tsa->tip", dZv, R) + torch.einsum("tsai,tsap->tip", Zt, W)
+            dR = W - torch.einsum("tsai,tip->tsap", Zt, torch.linalg.solve(G, rhs))
+            isc = iscale[o0:o0 + k].view(k, 1, 1, 1)
+            JI = (sb * dR / isc / sNI).reshape(k * nI * 6, -1); rI = (sb * R / iscale[o0:o0 + k] / sNI).reshape(-1)
+            A += JI.T @ JI; g += JI.T @ rI; rs.append(rI)
         return torch.cat(rs), g, A
 
     return unflat, resid, normal_eqs
 
 
-def train_lm_inv(model, aa, target, escale, iscale, beta, max_iters, lam=1e-3, record=None, every=10, chunk=4, wall_cap=None):
-    """Plain Levenberg-Marquardt (Marquardt scaling) on the combined energy + beta * invariance residuals."""
-    unflat, resid, normal_eqs = lm_residual_system(model, aa, target, escale, iscale, beta, chunk)
+def train_lm_inv(model, aa, target, escale, iscale, beta, max_iters, lam=1e-3, record=None, every=10, chunk=4, wall_cap=None,
+                 inv_angles=None, ckpt=None, ckpt_every=10, it0=0):
+    """Plain Levenberg-Marquardt (Marquardt scaling) on the combined energy + beta * invariance residuals.
+    ckpt(it_done, lam) is called every ckpt_every steps and at the end; it0 offsets the step count on resume."""
+    unflat, resid, normal_eqs = lm_residual_system(model, aa, target, escale, iscale, beta, chunk, inv_angles)
     v = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
     t0 = time.perf_counter(); why = "max_iters"; k = -1
     for k in range(max_iters):
@@ -567,7 +572,9 @@ def train_lm_inv(model, aa, target, escale, iscale, beta, max_iters, lam=1e-3, r
                 n = p.numel(); p.copy_(v[i:i + n].view_as(p)); i += n
         stop = not accepted or bool(wall_cap and time.perf_counter() - t0 > wall_cap)
         if record and (k % every == 0 or stop):
-            record(k, 2 * f, lam)
+            record(it0 + k, 2 * f, lam)
+        if ckpt and ((k + 1) % ckpt_every == 0 or stop or k == max_iters - 1):
+            ckpt(it0 + k + 1, lam)
         if stop:
             why = "no-descent" if not accepted else "walltime"; break
     return k + 1, why, lam

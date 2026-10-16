@@ -75,6 +75,24 @@ Unneeded nonlinear layers slow the approach to an exact solution, because LM has
 
 **Next decision:** add an invariance residual. Require Hamilton's equations on the torus, X_H(z) = Σᵢ Ωᵢ ∂z/∂θᵢ, with the per-torus frequencies Ω eliminated by least squares, just as ⟨H⟩ is eliminated in the energy loss. This constrains the near-resonant deformations at first order through the twist ∂Ω/∂J, and needs no other known integrals. Adding |L| and L_z residuals would work only for spherical or axisymmetric targets.
 
+## Invariance-weight sweep (Trillium, 16 Oct)
+
+The first test of the invariance residual used equal weights for 30 LM steps on the laptop. It lowered the worst-case |L| wander and the torus-energy errors, but not the typical wander, and it raised the mean energy error. The invariance residual starts about 8× larger than the energy residual, so β ≈ 1/64 balances the two terms in the squared loss.
+
+`configs/sweep_beta/` continues the trained isochrone model (`checkpoints/s3_isochrone.pt`) with plain LM for up to 68 h at β = 0 (control), 0.003, 0.01, 0.03, 0.1 and 1. Settings: invariance rows on 64 of the 256 angles per torus; checkpoints every 10 steps.
+
+Every log point records:
+- the held-out energy error;
+- the |L| wander (relative to J_r + L);
+- the invariance residual.
+
+The jobs run at different speeds (β = 0 is about 5× faster per step), so compare them at equal LM steps.
+
+```bash
+python run_batch.py configs/sweep_beta/*.json --workers 6 --threads 3   # 18 cores; rerun the same command to resume
+cat results/batch_status.txt
+```
+
 ## Run
 
 ```bash

@@ -1,0 +1,48 @@
+{
+ "toy": {
+  "kind": "spherical_ho",
+  "omega": 0.5
+ },
+ "data": {
+  "kind": "spherical",
+  "n_per_axis": 5,
+  "Jr": [
+   0.001,
+   0.2
+  ],
+  "L": [
+   0.01,
+   0.5
+  ],
+  "cosi_max": 0.9,
+  "n_angles": 256
+ },
+ "model": {
+  "n_lin": 2,
+  "n_blocks": 8,
+  "width": 32,
+  "gate_std": 0.001
+ },
+ "adam": {
+  "steps": 0
+ },
+ "seed": 0,
+ "threads": 4,
+ "name": "sweep_beta_0p003",
+ "target": {
+  "kind": "isochrone",
+  "GM": 1.0,
+  "b": 1.0
+ },
+ "lm": {
+  "max_iters": 100000,
+  "invariance_beta": 0.003,
+  "inv_angles": 64,
+  "every": 10,
+  "ckpt_every": 10,
+  "wall_hours": 68.0,
+  "chunk": 4,
+  "lam0": 1e-06
+ },
+ "init_from": "checkpoints/s3_isochrone.pt"
+}
