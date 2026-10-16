@@ -49,7 +49,30 @@ Unneeded nonlinear layers slow the approach to an exact solution, because LM has
 - The 100× gap comes entirely from the tori, not the angles:
   - training tori at new angles: 4.9×10⁻⁶ (the angles generalise);
   - new tori at the training angles: 7.1×10⁻⁴.
-- So 5 tori per axis is in the radial-interpolation regime the audit found in 1D. Next test: the same 32k-residual budget spent as 1,000 quasi-random tori × 32 angles.
+- So 5 tori per axis is in the radial-interpolation regime the audit found in 1D.
+- **The same 32k-residual budget spent as 1,000 quasi-random tori × 32 angles did not help:**
+
+  | Layout | Train | Held-out at LM 100 | Final held-out | 512 new random tori |
+  |---|---|---|---|---|
+  | 125 grid tori × 256 angles (200 LM steps) | 4.1×10⁻⁶ | 1.5×10⁻³ | 7.2×10⁻⁴ | 6.7×10⁻⁴ |
+  | 1,000 scattered tori × 32 angles (120 LM steps) | 4.2×10⁻⁴ | 1.9×10⁻³ | 1.8×10⁻³ | 1.9×10⁻³ |
+
+  The generalisation gap shrinks from 170× to 4×, but the fit itself progresses more slowly, and the corners of action space are sparsely covered (worst torus 3×10⁻², against 6×10⁻³ for the grid). **Decision:** keep the grid. At this budget the limit is fitting progress, not the layout.
+
+**Stage 3, the isochrone (GM = b = 1) from the spherical-oscillator toy (ω = 0.5, its small-J limit).** 125 tori labelled (J_r, L, cos i) with J_r ≤ 0.2 and L ≤ 0.5 (Ω_r falls 3× across the range) × 256 angles; same flow; 23 min on the laptop.
+
+- Held-out energy error **5.5×10⁻⁴** (max 7.9×10⁻³), still falling. Toy only: 5.8×10⁻²; after Adam: 1.1×10⁻².
+- Torus-mean energy within 4.2×10⁻⁵ of the exact H(J); frequencies within 6.7×10⁻⁴.
+- No generalisation gap: train 5.6×10⁻⁴, new tori 4.8×10⁻⁴, new angles 7.5×10⁻⁴.
+- **The learned tori are not yet the true invariant tori.** On a true isochrone torus, |x × v| = L everywhere.
+  - On the learned tori the *mean* |L| matches the toy's L to 2×10⁻⁵, as exact actions require.
+  - But |L| *varies* around each torus by 3×10⁻³ (median), 7× the energy variation, and by up to 5×10⁻² on the worst tori.
+  - The worst tori have Ω_r/Ω_L ≈ 1.98, next to the 2:1 resonance the oscillator toy has exactly.
+  - Near a resonance, deforming a torus along the resonant angle combination barely changes its energy, so the energy-variance loss is weak there. This is the known resonance problem of torus mapping.
+  - The separable quartic doesn't show it: its per-axis energies, also exact integrals, vary about as much as the total (6.6×10⁻⁴ against 9.2×10⁻⁴) and on average match the exact Eᵢ(Jᵢ) to 5×10⁻⁶.
+  - L_z varies by 1×10⁻²; that is allowed, because a spherical potential's tori can be tilted.
+
+**Next decision:** add an invariance residual. Require Hamilton's equations on the torus, X_H(z) = Σᵢ Ωᵢ ∂z/∂θᵢ, with the per-torus frequencies Ω eliminated by least squares, just as ⟨H⟩ is eliminated in the energy loss. This constrains the near-resonant deformations at first order through the twist ∂Ω/∂J, and needs no other known integrals. Adding |L| and L_z residuals would work only for spherical or axisymmetric targets.
 
 ## Run
 

@@ -206,6 +206,13 @@ class SphericalToyHO(torch.nn.Module):
         return self.w * (2 * J[..., 0] + J[..., 1])
 
 
+def sobol_spherical_actions(n, Jr_lo, Jr_hi, L_lo, L_hi, cosi_max=0.9, seed=1):
+    """n tori scattered quasi-randomly: log-uniform in J_r and L, uniform in cos i; actions (J_r, L, L cos i)."""
+    u = torch.quasirandom.SobolEngine(3, scramble=True, seed=seed).draw(n).to(F64)
+    Jr = Jr_lo * (Jr_hi / Jr_lo) ** u[:, 0]; L = L_lo * (L_hi / L_lo) ** u[:, 1]; c = cosi_max * (2 * u[:, 2] - 1)
+    return torch.stack([Jr, L, L * c], -1)
+
+
 def spherical_action_grid(n_per_axis, Jr_lo, Jr_hi, L_lo, L_hi, cosi_max=0.9, midpoints=False):
     """Tori labelled by (J_r, L, cos i): geometric in J_r and L, uniform in cos i on [-cosi_max, cosi_max];
     returns actions (J_r, L, L_z = L cos i). midpoints=True gives the held-out tori between them."""

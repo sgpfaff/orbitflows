@@ -7,6 +7,7 @@ Writes results/<name>/{config.json, log.jsonl, model.pt, result.json}. Config ke
   model   {"n_lin": 2, "n_blocks": 4, "width": 16, "gate_std": 1e-3}
   adam    {"steps": 300, "lr": 1e-3}
   lm      {"max_iters": 300, "geodesic": true, "wall_hours": 1.0}
+  init_from   name of an earlier run in the same results folder: its matching layers are loaded (grow a model)
   seed, threads
 """
 import os
@@ -31,12 +32,20 @@ def main(cfg, out_root):
     if d.get("kind", "cartesian") == "spherical":  # tori labelled by (J_r, L, cos i)
         sg = lambda mid: C.spherical_action_grid(d["n_per_axis"], d["Jr"][0], d["Jr"][1], d["L"][0], d["L"][1], d.get("cosi_max", 0.9), mid)
         Jt, J_eval = sg(False), sg(True)
+        if d.get("tori") == "sobol":
+            Jt = C.sobol_spherical_actions(d["n_tori"], d["Jr"][0], d["Jr"][1], d["L"][0], d["L"][1], d.get("cosi_max", 0.9), seed=1 + cfg.get("seed", 0))
     else:
         Jt, J_eval = C.action_grid(d["n_per_axis"], d["J_lo"], d["J_hi"]), C.action_grid(d["n_per_axis"], d["J_lo"], d["J_hi"], midpoints=True)
         if d.get("tori") == "sobol":  # scattered training tori; the held-out grid stays the same
             Jt = C.sobol_actions(d["n_tori"], d["J_lo"], d["J_hi"], seed=1 + cfg.get("seed", 0))
     aa = C.aa_points(Jt, C.angle_samples(d["n_angles"], cfg.get("seed", 0)))
     m = C.build_model(cfg["model"], cfg["toy"], seed=cfg.get("seed", 0))
+    if cfg.get("init_from"):  # grow: load every matching layer of an earlier model (e.g. a linear-only fit)
+        src = torch.load(os.path.join(out_root, cfg["init_from"], "model.pt"), weights_only=False)["state"]
+        own = m.state_dict()
+        keep = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
+        m.load_state_dict(keep, strict=False)
+        print(f"initialised {len(keep)}/{len(own)} tensors from {cfg['init_from']}", flush=True)
     esc = m.toy.energy(Jt).reshape(-1, 1)
     ev = C.Evaluator(t, J=J_eval, n_angles=d.get("n_eval_angles", 1024))
     logf = open(os.path.join(jdir, "log.jsonl"), "w"); t0 = time.perf_counter()
