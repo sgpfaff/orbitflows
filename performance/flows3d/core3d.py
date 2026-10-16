@@ -34,9 +34,12 @@ class AnisoHO:
     def __init__(self, omegas=(1.0, 1.4, 1.9)):
         self.w = torch.tensor(omegas, dtype=F64)
 
+    def pot(self, x):
+        return 0.5 * ((self.w * x) ** 2).sum(-1)
+
     def H(self, xv):
         x, v = xv[..., :3], xv[..., 3:]
-        return 0.5 * (v * v).sum(-1) + 0.5 * ((self.w * x) ** 2).sum(-1)
+        return 0.5 * (v * v).sum(-1) + self.pot(x)
 
     def E_of_J(self, J):
         return (self.w * J).sum(-1)
@@ -73,9 +76,12 @@ class SeparableQuartic:
     def phi(self, x):
         return 0.5 * (self.w * x) ** 2 + 0.25 * self.l * x ** 4
 
+    def pot(self, x):
+        return self.phi(x).sum(-1)
+
     def H(self, xv):
         x, v = xv[..., :3], xv[..., 3:]
-        return 0.5 * (v * v).sum(-1) + self.phi(x).sum(-1)
+        return 0.5 * (v * v).sum(-1) + self.pot(x)
 
     def _xmax(self, E):  # root of l x^4/4 + w^2 x^2/2 = E, per axis, in the cancellation-free form
         a = 0.5 * self.w ** 2
@@ -124,10 +130,12 @@ class Isochrone:
         self.omega0 = math.sqrt(self.GM / (4 * self.b ** 3))
         self.E0 = -self.GM / (2 * self.b)  # Phi(0): relative errors are measured above it
 
+    def pot(self, x):
+        return -self.GM / (self.b + torch.sqrt(self.b ** 2 + (x * x).sum(-1)))
+
     def H(self, xv):
         x, v = xv[..., :3], xv[..., 3:]
-        r2 = (x * x).sum(-1)
-        return 0.5 * (v * v).sum(-1) - self.GM / (self.b + torch.sqrt(self.b ** 2 + r2))
+        return 0.5 * (v * v).sum(-1) + self.pot(x)
 
     def _D(self, J):
         L = J[..., 1]
@@ -355,6 +363,52 @@ def residuals(model, aa, target, escale=None):
     return (H - m) / (escale if escale is not None else (m - target.E0).abs())
 
 
+def hamiltonian_field(target, xv, create_graph=False):
+    """X_H = (dH/dv, -dH/dx) = (v, -grad Phi(x)) for H = v^2/2 + Phi(x)."""
+    x = xv[..., :3]
+    if not x.requires_grad:
+        x = x.detach().requires_grad_(True)
+    g = torch.autograd.grad(target.pot(x).sum(), x, create_graph=create_graph)[0]
+    return torch.cat([xv[..., 3:], -g], -1)
+
+
+def angle_tangents(model, aa):
+    """z = model(aa) and Z = dz/dtheta, (N, 6) and (N, 6, 3), by forward-mode AD (one jvp per angle)."""
+    from torch.func import jvp
+    x = aa.reshape(-1, 6); Zs = []
+    for i in range(3):
+        t = torch.zeros_like(x); t[:, i] = 1.0
+        z, dz = jvp(model, (x,), (t,))
+        Zs.append(dz)
+    return z, torch.stack(Zs, -1)
+
+
+def invariance_residuals(model, aa, target, iscale=None, create_graph=False):
+    """Torus invariance: on a true torus, Hamilton's flow moves every point along the torus at constant angular
+    frequencies, X_H(z) = sum_i Omega_i dz/dtheta_i. Omega is fitted per torus by least squares over its angle
+    samples (eliminated, like <H> in the energy residual); returns R = X_H(z) - Z Omega, (nO, nS, 6), divided by
+    iscale (nO, 1, 1), and the fitted Omega (nO, 3)."""
+    nO, nS = aa.shape[:2]
+    z, Z = angle_tangents(model, aa)
+    X = hamiltonian_field(target, z, create_graph=create_graph)
+    X, Z = X.view(nO, nS, 6), Z.view(nO, nS, 6, 3)
+    G = torch.einsum("tsai,tsaj->tij", Z, Z); b = torch.einsum("tsai,tsa->ti", Z, X)
+    Om = torch.linalg.solve(G, b[..., None])[..., 0]
+    R = X - torch.einsum("tsai,ti->tsa", Z, Om)
+    return (R / iscale if iscale is not None else R), Om
+
+
+def invariance_scale(model, aa):
+    """Fixed per-torus scale: the rms speed of the toy's own flow on the toy torus, sum_i w_i dz_toy/dtheta_i."""
+    nO, nS = aa.shape[:2]
+    with torch.no_grad():
+        toy = model.toy
+        _, Zt = angle_tangents(toy, aa)
+        w = toy.w if toy.w.dim() else torch.stack([2 * toy.w, toy.w, 0 * toy.w])  # spherical toy: (2w, w, 0)
+        Xt = torch.einsum("nai,i->na", Zt, w).view(nO, nS, 6)
+        return Xt.pow(2).sum(-1).mean(-1).sqrt().view(nO, 1, 1)
+
+
 class Evaluator:
     def __init__(self, target, J_lo=None, J_hi=None, n_train_per_axis=None, n_angles=1024, seed=12345, J=None):
         self.target = target
@@ -395,6 +449,128 @@ def train_adam(model, aa, target, steps, lr, escale, record=None, every=100):
         opt.zero_grad(set_to_none=True); loss.backward(); opt.step(); sch.step()
         if record and (k % every == 0 or k == steps - 1):
             record(k, float(loss))
+
+
+def lm_residual_system(model, aa, target, escale, iscale=None, beta=0.0, chunk=4):
+    """Build f(v) -> r (stacked residual vector) and normal_eqs(v) -> (r, J^T r, J^T J) for the combined loss
+    mean r_E^2 + beta * mean |R/iscale|^2 (energy and invariance residuals), both scaled by 1/sqrt(N points).
+
+    Per-point Jacobians of y = (z, dz/dtheta) w.r.t. the parameter dict by vmap(jacrev) (reverse over forward);
+    then chained analytically: dH = grad H . dz; for the invariance residual R_s = X_H(z_s) - Z_s Omega with the
+    per-torus least-squares Omega = G^-1 b (G = sum Z^T Z, b = sum Z^T X):
+        dX = (dv, -Hess Phi dx),  dOmega = G^-1 sum_s [dZ_s^T R_s + Z_s^T (dX_s - dZ_s Omega)],
+        dR_s = dX_s - dZ_s Omega - Z_s dOmega."""
+    from torch.func import functional_call, jacrev, vmap, jvp, hessian
+    names = [n for n, _ in model.named_parameters()]
+    shapes = [p.shape for _, p in model.named_parameters()]
+    sizes = [p.numel() for _, p in model.named_parameters()]
+    nO, nS = aa.shape[:2]; N = nO * nS; sN = math.sqrt(N); sb = math.sqrt(beta)
+    E3 = torch.eye(3, dtype=F64)
+
+    def unflat(v):
+        out, i = {}, 0
+        for n, s_, k in zip(names, shapes, sizes):
+            out[n] = v[i:i + k].view(s_); i += k
+        return out
+
+    def y_point(p, x):  # z and dz/dtheta for one point
+        f = lambda xx: functional_call(model, p, (xx[None],))[0]
+        z = f(x)
+        Z = torch.stack([jvp(f, (x,), (torch.cat([E3[i], torch.zeros(3, dtype=F64)]),))[1] for i in range(3)], -1)
+        return torch.cat([z, Z.reshape(-1)])
+
+    def resid_from(z, Z, o0, k):
+        H = target.H(z).view(k, nS)
+        rE = ((H - H.mean(1, keepdim=True)) / escale[o0:o0 + k] / sN).reshape(-1)
+        if not beta:
+            return rE
+        X = torch.cat([z[:, 3:], -vmap(torch.func.grad(lambda xx: target.pot(xx)))(z[:, :3])], -1).view(k, nS, 6)
+        Zt = Z.view(k, nS, 6, 3)
+        Om = torch.linalg.solve(torch.einsum("tsai,tsaj->tij", Zt, Zt), torch.einsum("tsai,tsa->ti", Zt, X)[..., None])[..., 0]
+        R = (X - torch.einsum("tsai,ti->tsa", Zt, Om)) / iscale[o0:o0 + k]
+        return torch.cat([rE, sb * R.reshape(-1) / sN])
+
+    def resid(v, graph=False):
+        pd = unflat(v); out = []
+        ctx = torch.enable_grad() if graph else torch.no_grad()
+        for o0 in range(0, nO, chunk):  # same chunks, so the same row order, as normal_eqs
+            x = aa[o0:o0 + chunk].reshape(-1, 6); k = x.shape[0] // nS
+            if beta:
+                y = vmap(y_point, in_dims=(None, 0))(pd, x) if graph else torch.func.vmap(y_point, in_dims=(None, 0))(pd, x)
+                z, Z = y[:, :6], y[:, 6:].reshape(-1, 6, 3)
+            else:
+                with ctx:
+                    z = functional_call(model, pd, (x,)); Z = None
+            out.append(resid_from(z, Z, o0, k))
+        return torch.cat(out)
+
+    def normal_eqs(v):
+        P = v.numel(); A = torch.zeros(P, P, dtype=F64); g = torch.zeros(P, dtype=F64); rs = []
+        pd = unflat(v)
+        for o0 in range(0, nO, chunk):
+            x = aa[o0:o0 + chunk].reshape(-1, 6); k = x.shape[0] // nS
+            Jd = vmap(jacrev(y_point), in_dims=(None, 0))(pd, x)
+            Jy = torch.cat([Jd[n].reshape(x.shape[0], 24, -1) for n in names], -1); del Jd
+            with torch.no_grad():
+                y = vmap(y_point, in_dims=(None, 0))(pd, x)
+            z, Z = y[:, :6], y[:, 6:].reshape(-1, 6, 3)
+            dz, dZ = Jy[:, :6], Jy[:, 6:].reshape(x.shape[0], 6, 3, -1); del Jy
+            # energy rows
+            zz = z.detach().requires_grad_(True); Hf = target.H(zz); dHdy = torch.autograd.grad(Hf.sum(), zz)[0]
+            H = Hf.detach().view(k, nS); es = escale[o0:o0 + k]
+            rE = ((H - H.mean(1, keepdim=True)) / es / sN).reshape(-1)
+            dH = (dHdy[:, :, None] * dz).sum(1).view(k, nS, -1)
+            JE = ((dH - dH.mean(1, keepdim=True)) / es[..., None] / sN).reshape(k * nS, -1)
+            A += JE.T @ JE; g += JE.T @ rE; r_parts = [rE]
+            if beta:
+                x3 = z[:, :3]
+                gradPhi = vmap(torch.func.grad(lambda xx: target.pot(xx)))(x3); Hess = vmap(hessian(lambda xx: target.pot(xx)))(x3)
+                X = torch.cat([z[:, 3:], -gradPhi], -1)
+                dX = torch.cat([dz[:, 3:], -torch.einsum("nab,nbp->nap", Hess, dz[:, :3])], 1)       # (n, 6, P)
+                Xt, Zt = X.view(k, nS, 6), Z.view(k, nS, 6, 3)
+                G = torch.einsum("tsai,tsaj->tij", Zt, Zt); Om = torch.linalg.solve(G, torch.einsum("tsai,tsa->ti", Zt, Xt)[..., None])[..., 0]
+                R = Xt - torch.einsum("tsai,ti->tsa", Zt, Om)
+                dZv = dZ.view(k, nS, 6, 3, -1); dXv = dX.view(k, nS, 6, -1)
+                W = dXv - torch.einsum("tsaip,ti->tsap", dZv, Om)                                       # dX - dZ Omega
+                rhs = torch.einsum("tsaip,tsa->tip", dZv, R) + torch.einsum("tsai,tsap->tip", Zt, W)
+                dOm = torch.linalg.solve(G, rhs)                                                        # (k, 3, P)
+                dR = W - torch.einsum("tsai,tip->tsap", Zt, dOm)
+                isc = iscale[o0:o0 + k].view(k, 1, 1, 1)
+                JI = (sb * dR / isc / sN).reshape(k * nS * 6, -1); rI = (sb * R / iscale[o0:o0 + k] / sN).reshape(-1)
+                A += JI.T @ JI; g += JI.T @ rI; r_parts.append(rI)
+            rs.append(torch.cat(r_parts))
+        return torch.cat(rs), g, A
+
+    return unflat, resid, normal_eqs
+
+
+def train_lm_inv(model, aa, target, escale, iscale, beta, max_iters, lam=1e-3, record=None, every=10, chunk=4, wall_cap=None):
+    """Plain Levenberg-Marquardt (Marquardt scaling) on the combined energy + beta * invariance residuals."""
+    unflat, resid, normal_eqs = lm_residual_system(model, aa, target, escale, iscale, beta, chunk)
+    v = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
+    t0 = time.perf_counter(); why = "max_iters"; k = -1
+    for k in range(max_iters):
+        r, g, A = normal_eqs(v); f = 0.5 * float(r @ r)
+        dg = torch.diagonal(A).clone(); accepted = False
+        for _ in range(30):
+            L, info = torch.linalg.cholesky_ex(A + lam * torch.diag(dg + 1e-12 * dg.max()))
+            if int(info) != 0:
+                lam *= 10; continue
+            d = -torch.cholesky_solve(g[:, None], L)[:, 0]
+            fn = 0.5 * float(resid(v + d).pow(2).sum())
+            if math.isfinite(fn) and fn < f:
+                v, f, accepted = v + d, fn, True; lam = max(lam / 3, 1e-15); break
+            lam *= 4
+        with torch.no_grad():
+            i = 0
+            for p in model.parameters():
+                n = p.numel(); p.copy_(v[i:i + n].view_as(p)); i += n
+        stop = not accepted or bool(wall_cap and time.perf_counter() - t0 > wall_cap)
+        if record and (k % every == 0 or stop):
+            record(k, 2 * f, lam)
+        if stop:
+            why = "no-descent" if not accepted else "walltime"; break
+    return k + 1, why, lam
 
 
 def train_lm(model, aa, target, escale, max_iters, lam=1e-3, record=None, every=10, chunk=8, geodesic=True,

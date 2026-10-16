@@ -1,0 +1,307 @@
+<meta charset="utf-8">
+<title>3D Torus Flows</title>
+<meta name="description" content="Progress on learning 3D action-angle maps with exactly symplectic flows: sanity checks, validation and results">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<style>
+/* Layout: one report column (~68ch prose) with figure grids breaking wider; same visual family as the
+   orbitflows precision audit (shared palette and type), so the two read as one project. */
+:root{
+  --bg:#f3f5f8; --surface:#fbfcfd; --raised:#ffffff;
+  --ink:#121620; --ink-2:#465061; --muted:#7a8394; --rule:#dce1e8; --rule-2:#c6cdd8;
+  --accent:#2f43a8; --accent-soft:#e5e8f6;
+  --good:#17824a; --good-soft:#e2f2e9; --crit:#c0352e; --warn:#c8671a;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7;
+  --grid:#e3e7ed;
+  --f-display:"Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body:"Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --step--1:.8125rem; --step-0:1rem; --step-1:1.1875rem; --step-2:1.5rem; --step-3:2.125rem; --step-4:2.75rem;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1117; --surface:#151a22; --raised:#1a2029;
+    --ink:#e7ebf1; --ink-2:#aab3c1; --muted:#7c8597; --rule:#262d38; --rule-2:#343c49;
+    --accent:#93a2ff; --accent-soft:#1d2342;
+    --good:#4cc47f; --good-soft:#15291e; --crit:#ef6a61; --warn:#eb9a4f;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#2f9a2f; --s7:#9085e9;
+    --grid:#232a34; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1117; --surface:#151a22; --raised:#1a2029;
+  --ink:#e7ebf1; --ink-2:#aab3c1; --muted:#7c8597; --rule:#262d38; --rule-2:#343c49;
+  --accent:#93a2ff; --accent-soft:#1d2342;
+  --good:#4cc47f; --good-soft:#15291e; --crit:#ef6a61; --warn:#eb9a4f;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#2f9a2f; --s7:#9085e9;
+  --grid:#232a34; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg); color:var(--ink); font-family:var(--f-body); font-size:var(--step-0); line-height:1.6; margin:0}
+.wrap{max-width:1080px; margin:0 auto; padding-inline:clamp(16px,4vw,40px); padding-block:32px 80px; display:grid; gap:44px}
+h1,h2,h3{font-family:var(--f-display); text-wrap:balance; letter-spacing:-.01em; margin:0}
+h1{font-size:var(--step-4); line-height:1.05; font-weight:760; font-stretch:88%}
+h2{font-size:var(--step-3); line-height:1.15; font-weight:720; font-stretch:92%}
+h3{font-size:var(--step-1); line-height:1.3; font-weight:650}
+p{margin:0}
+.prose{max-width:68ch; display:grid; gap:12px}
+.prose ul{margin:0; padding-left:1.2em; display:grid; gap:6px}
+.eyebrow{font-family:var(--f-display); font-size:.75rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
+.lede{font-size:var(--step-1); color:var(--ink-2); max-width:62ch}
+.mono{font-family:var(--f-mono); font-size:.86em}
+section{display:grid; gap:18px; min-width:0}
+.head{display:grid; gap:12px}
+.status{display:flex; flex-wrap:wrap; gap:8px 14px; font-family:var(--f-display); font-size:var(--step--1); color:var(--ink-2)}
+.status span{display:inline-flex; align-items:center; gap:6px}
+.dot{width:8px; height:8px; border-radius:50%; background:var(--accent); display:inline-block}
+.tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px}
+.tile{background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; display:grid; gap:4px; min-width:0}
+.tile .k{font-family:var(--f-display); font-size:.75rem; letter-spacing:.06em; text-transform:uppercase; color:var(--muted)}
+.tile .v{font-family:var(--f-mono); font-size:var(--step-2); font-weight:600; font-variant-numeric:tabular-nums}
+.tile .n{font-size:var(--step--1); color:var(--ink-2); line-height:1.45}
+.fig{background:var(--surface); border:1px solid var(--rule); border-radius:12px; padding:16px; display:grid; gap:10px; min-width:0}
+.fig h3{font-size:var(--step-0)}
+.cap{font-size:var(--step--1); color:var(--ink-2); line-height:1.5; max-width:80ch}
+.grid3{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px}
+.grid2{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px}
+@media (max-width:820px){.grid3,.grid2{grid-template-columns:minmax(0,1fr)}}
+.plot{min-width:0; overflow:hidden}
+.plot svg{max-width:100%; height:auto; overflow:visible}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse; width:100%; font-size:var(--step--1); font-family:var(--f-display)}
+th,td{padding:7px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top}
+th{color:var(--muted); font-weight:600; font-size:.75rem; letter-spacing:.04em; text-transform:uppercase}
+td.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums; white-space:nowrap}
+.chip{display:inline-block; padding:1px 8px; border-radius:999px; font-size:.72rem; font-weight:700; letter-spacing:.04em}
+.chip.ok{background:var(--good-soft); color:var(--good)} .chip.no{background:var(--crit); color:var(--raised)}
+.legend{display:flex; flex-wrap:wrap; gap:6px 14px; font-family:var(--f-display); font-size:.75rem; color:var(--ink-2)}
+.legend i{display:inline-block; width:14px; height:3px; border-radius:2px; margin-right:6px; vertical-align:middle}
+.legend i.pt{width:7px; height:7px; border-radius:50%}
+.legend i.dash{background:repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px) !important; height:2px}
+.log{display:grid; gap:10px}
+.log div{display:grid; grid-template-columns:minmax(0,1fr); gap:2px; border-left:2px solid var(--rule-2); padding-left:12px}
+.log b{font-family:var(--f-display); font-size:var(--step--1)}
+.log span{font-size:var(--step--1); color:var(--ink-2)}
+.pending{color:var(--muted); font-style:italic; font-size:var(--step--1)}
+</style>
+<div class="wrap">
+  <header class="head">
+    <div class="eyebrow">orbitflows · branch flows-3d · __GENERATED__</div>
+    <h1>3D Torus Flows</h1>
+    <p class="lede">Learning action-angle maps for 3D potentials with exactly symplectic shear flows: a toy oscillator torus is mapped onto the true torus, and training asks only that the energy be constant on it.</p>
+    <div class="status" id="status"></div>
+  </header>
+
+  <section>
+    <h2>Where things stand</h2>
+    <div class="tiles" id="tiles"></div>
+    <div class="prose" id="summary"></div>
+  </section>
+
+  <section id="sanity">
+    <div class="eyebrow">1 · Sanity checks</div>
+    <h2>The pieces are exact before training starts</h2>
+    <p class="prose">Every check below is recomputed from the current code each time this page is built. "Expected" is the size of float64 round-off, or the known accuracy of the comparison.</p>
+    <div class="tablewrap" id="sanity-table"></div>
+  </section>
+
+  <section id="validation">
+    <div class="eyebrow">2 · Validation</div>
+    <h2>Held-out error, and where it comes from</h2>
+    <div class="fig"><h3>Held-out energy error during training</h3><div class="plot" id="fig-curves"></div>
+      <div class="cap">Mean relative energy variation on held-out tori (between the training tori, at 1,024 independent angles), against Levenberg–Marquardt step. Each curve starts where its Adam stage ended (300 or 1,000 steps). Errors are relative to the torus energy above the potential minimum.</div></div>
+    <div class="fig"><h3>Which held-out direction fails: new angles or new tori?</h3><div class="tablewrap" id="gen-table"></div>
+      <div class="cap">Each trained model is scored on its training tori at new angles, and on new tori at its training angles. A large jump on new tori only means the tori are too sparse; a large jump on new angles only would mean too few angles per torus.</div></div>
+  </section>
+
+  <section id="pictures">
+    <div class="eyebrow">3 · What the learned tori look like</div>
+    <h2>Learned points on the true orbits</h2>
+    <div class="fig"><h3>Separable quartic: one torus, seen axis by axis</h3>
+      <div class="legend"><span><i style="background:var(--ink)"></i>exact orbit (level curve of this axis's energy)</span><span><i class="pt" style="background:var(--muted)"></i>toy oscillator torus (start)</span><span><i class="pt" style="background:var(--s1)"></i>learned torus points</span></div>
+      <div class="grid3" id="fig-quartic"></div>
+      <div class="grid3" id="fig-quartic-dev"></div>
+      <div class="cap">Top: the projection of one held-out torus onto each axis's (x, v) plane. On a separable potential each axis keeps its own energy, so a correct torus lies exactly on that axis's level curve. The toy's ellipses are off; the learned points sit on the curves. Bottom: how far each learned point is from its curve, as the error in that axis's energy (relative to the torus energy), against the point's angle on that axis.</div></div>
+    <div class="fig"><h3>Isochrone: radial phase portraits of three held-out tori</h3>
+      <div class="legend"><span><i style="background:var(--ink)"></i>exact (r, p_r) curve for the torus's E(J) and L</span><span><i class="pt" style="background:var(--s3)"></i>learned torus points</span></div>
+      <div class="grid3" id="fig-iso"></div>
+      <div class="cap">For a spherical potential, every point of a true torus lies on one closed curve in (r, p_r), fixed by the torus's energy and angular momentum. The learned points follow the exact curves.</div></div>
+    <div class="fig"><h3>Where the energy loss is blind: the worst isochrone torus</h3><div class="plot" id="fig-wander"></div>
+      <div class="cap" id="wander-cap"></div></div>
+  </section>
+
+  <section id="invariance">
+    <div class="eyebrow">4 · Experiment in progress</div>
+    <h2>Adding an invariance residual</h2>
+    <div class="prose"><p>On a true torus, the system's own motion carries every point along the torus at fixed frequencies: X<sub>H</sub>(z) = Σ<sub>i</sub> Ω<sub>i</sub> ∂z/∂θ<sub>i</sub>. The new residual measures how far each point is from that, with Ω fitted per torus by least squares. It is zero for the exact maps above (sanity checks), and on the trained isochrone it is 8× the energy error. Starting from the trained isochrone model, two 30-step Levenberg–Marquardt runs compare the energy loss alone against energy plus invariance.</p></div>
+    <div id="inv-block"></div>
+  </section>
+
+  <section id="log">
+    <div class="eyebrow">5 · Decisions</div>
+    <h2>Decision log</h2>
+    <div class="log" id="decisions"></div>
+  </section>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.17/dist/plot.umd.min.js"></script>
+<script>
+const DATA = __DATA__;
+const $ = s => document.querySelector(s);
+const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = v => (v == null || !isFinite(v)) ? '–' : (Math.abs(v) >= 1e-2 && Math.abs(v) < 1e4 ? (+v).toPrecision(3) : (+v).toExponential(1));
+const sup = v => { const s = (+v).toExponential(1); const [m, e] = s.split('e'); return `${m}×10<sup>${+e}</sup>`; };
+const NAMES = {s1_aniso_ho: 'Stage 1 · anisotropic oscillator', s2_sep_quartic: 'Stage 2 · separable quartic (grid tori)',
+  s2b_sep_quartic_sobol: 'Stage 2 · separable quartic (scattered tori)', s3_isochrone: 'Stage 3 · isochrone'};
+const COL = {s1_aniso_ho: '--s1', s2_sep_quartic: '--s2', s2b_sep_quartic_sobol: '--s4', s3_isochrone: '--s3'};
+function base(el, o) {
+  const w = Math.max(260, el.clientWidth || 600);
+  return Object.assign({width: w, height: 300, marginLeft: 56, marginBottom: 40, marginTop: 14, marginRight: 14,
+    style: {background: 'transparent', color: tok('--ink-2'), fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: '11px'},
+    grid: true}, o);
+}
+const logDom = (vals, pad = 1.6) => { const v = vals.filter(x => x > 0 && isFinite(x)); return [d3.min(v) / pad, d3.max(v) * pad]; };
+const linDom = (vals, pad = .06) => { const lo = d3.min(vals), hi = d3.max(vals), d = (hi - lo) || 1; return [lo - pad * d, hi + pad * d]; };
+const legend = items => `<div class="legend">${items.map(([c, l, dash]) => `<span><i class="${dash ? 'dash' : ''}" style="background:${c};color:${c}"></i>${l}</span>`).join('')}</div>`;
+const charts = [];
+function chart(id, fn) { charts.push([id, fn]); }
+function renderAll() {
+  for (const [id, fn] of charts) {
+    const el = document.getElementById(id); if (!el) continue;
+    el.innerHTML = ''; const node = fn(el); if (node) el.append(node);
+  }
+}
+
+/* ---------- header, tiles, summary ---------- */
+(function () {
+  const S = DATA.sanity, nok = S.filter(s => s.ok).length;
+  $('#status').innerHTML = `<span><i class="dot" style="background:var(--good)"></i>${nok}/${S.length} sanity checks pass</span>` +
+    `<span><i class="dot"></i>3 targets trained on the laptop</span>` +
+    `<span><i class="dot" style="background:${DATA.invariance ? 'var(--good)' : 'var(--warn)'}"></i>invariance experiment ${DATA.invariance ? 'finished' : 'running'}</span>`;
+  const last = n => { const c = DATA.curves[n]; return c ? c[c.length - 1].ev : null; };
+  const tiles = [
+    ['Anisotropic oscillator', '2.6e-16', 'held-out error with linear shears only, by LM step 15: machine precision (the exact map is linear)'],
+    ['Separable quartic', fmt(last('s2_sep_quartic')), 'held-out energy error; limited by how densely the training tori cover action space'],
+    ['Isochrone', fmt(last('s3_isochrone')), 'held-out energy error after 200 LM steps, still falling; torus energies within 4×10⁻⁵ of exact'],
+  ];
+  $('#tiles').innerHTML = tiles.map(([k, v, n]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join('');
+  $('#summary').innerHTML = `<ul>
+    <li><b>The 3D pipeline is exact where it should be.</b> Both toy maps are symplectic to round-off, the ground truth is good to 10⁻¹⁶, and with only linear layers the oscillator target is learned to machine precision.</li>
+    <li><b>Nonlinear 3D targets train well but not yet to high precision</b> on laptop budgets (20–25 minutes): about 6×10⁻⁴ for both the separable quartic and the isochrone.</li>
+    <li><b>The main finding so far:</b> the energy-variance loss barely constrains deformations along slow angle combinations. On the isochrone, the learned tori are energy-constant to ${fmt(d3.median(DATA.isochrone.per_torus.energy))} (median), but their angular momentum wanders ${Math.round(d3.median(DATA.isochrone.per_torus.wander) / d3.median(DATA.isochrone.per_torus.energy))}× more, in modes with k·Ω ≈ 0 (section 3). An invariance residual that targets this is being tested (section 4).</li></ul>`;
+})();
+
+/* ---------- sanity table ---------- */
+(function () {
+  const rows = DATA.sanity.map(s => `<tr><td>${s.group}</td><td>${s.what}</td><td class="num">${sup(s.value)}</td><td class="num">${s.target}</td><td><span class="chip ${s.ok ? 'ok' : 'no'}">${s.ok ? 'PASS' : 'FAIL'}</span></td></tr>`).join('');
+  $('#sanity-table').innerHTML = `<table><thead><tr><th>Area</th><th>Check</th><th>Value</th><th>Expected</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+})();
+
+/* ---------- learning curves ---------- */
+chart('fig-curves', el => {
+  const rows = []; for (const [n, c] of Object.entries(DATA.curves)) c.filter(r => r.stage === 'lm').forEach(r => rows.push({n, x: r.it + 1, v: r.ev, it: r.it}));
+  const xd = [1, d3.max(rows, r => r.x) * 1.15], yd = logDom(rows.map(r => r.v), 2);
+  const p = Plot.plot(base(el, {height: 320, x: {type: 'log', domain: xd, label: 'Levenberg–Marquardt step + 1 →'},
+    y: {type: 'log', domain: yd, label: '↑ held-out energy error'},
+    marks: [Plot.line(rows, {x: 'x', y: 'v', z: 'n', stroke: d => tok(COL[d.n]), strokeWidth: 2, tip: true, title: d => `${NAMES[d.n]}\nLM step ${d.it}: ${fmt(d.v)}`})]}));
+  const w = document.createElement('div'); w.innerHTML = legend(Object.keys(DATA.curves).map(n => [tok(COL[n]), NAMES[n]])); w.append(p); return w;
+});
+(function () {
+  const G = DATA.generalisation; if (!G.length) return;
+  $('#gen-table').innerHTML = `<table><thead><tr><th>Model</th><th>training tori, training angles</th><th>training tori, new angles</th><th>new tori, training angles</th><th>new tori, new angles</th></tr></thead><tbody>
+    ${G.map(g => `<tr><td>${NAMES[g.name]}</td><td class="num">${fmt(g.train)}</td><td class="num">${fmt(g.new_angles)}</td><td class="num"><b>${fmt(g.new_tori)}</b></td><td class="num">${fmt(g.held_out)}</td></tr>`).join('')}</tbody></table>`;
+})();
+
+/* ---------- quartic phase portraits ---------- */
+chart('fig-quartic', el => {
+  const T = DATA.quartic[1], w = document.createDocumentFragment();
+  T.axes.forEach((a, i) => {
+    const d = document.createElement('div'); d.className = 'plot'; w.append(d);
+    const curve = a.curve_x.map((x, k) => ({x, v: a.curve_v[k]})), L = a.learned_x.map((x, k) => ({x, v: a.learned_v[k]})), T0 = a.toy_x.map((x, k) => ({x, v: a.toy_v[k]}));
+    const xd = linDom([...curve.map(p => p.x), ...T0.map(p => p.x)]), yd = linDom([...curve.map(p => p.v), ...T0.map(p => p.v)]);
+    d.append(Plot.plot(base(el, {width: Math.max(220, (el.clientWidth - 24) / (el.clientWidth > 700 ? 3 : 1)), height: 240, marginLeft: 46,
+      x: {domain: xd, label: `x${'₁₂₃'[i]} →`}, y: {domain: yd, label: `↑ v${'₁₂₃'[i]}`},
+      marks: [Plot.dot(T0, {x: 'x', y: 'v', r: 1.1, fill: tok('--muted'), fillOpacity: .5}),
+        Plot.line(curve, {x: 'x', y: 'v', stroke: tok('--ink'), strokeWidth: 1.4}),
+        Plot.dot(L, {x: 'x', y: 'v', r: 1.4, fill: tok('--s1')})]})));
+  });
+  return w;
+});
+chart('fig-quartic-dev', el => {
+  const T = DATA.quartic[1], w = document.createDocumentFragment();
+  T.axes.forEach((a, i) => {
+    const d = document.createElement('div'); d.className = 'plot'; w.append(d);
+    const pts = a.dev.map((e, k) => ({th: a.theta[k], e}));
+    const m = d3.max(pts, p => Math.abs(p.e)) * 1.15;
+    d.append(Plot.plot(base(el, {width: Math.max(220, (el.clientWidth - 24) / (el.clientWidth > 700 ? 3 : 1)), height: 150, marginLeft: 56,
+      x: {domain: [0, 2 * Math.PI], label: `toy angle θ${'₁₂₃'[i]} →`, ticks: [0, Math.PI, 2 * Math.PI], tickFormat: d => ['0', 'π', '2π'][Math.round(d / Math.PI)]},
+      y: {domain: [-m, m], label: '↑ energy error', tickFormat: '.0e'},
+      marks: [Plot.ruleY([0], {stroke: tok('--ink')}), Plot.dot(pts, {x: 'th', y: 'e', r: 1.3, fill: tok('--s1')})]})));
+  });
+  return w;
+});
+
+/* ---------- isochrone portraits ---------- */
+chart('fig-iso', el => {
+  const w = document.createDocumentFragment();
+  DATA.isochrone.portraits.forEach(P => {
+    const d = document.createElement('div'); d.className = 'plot'; w.append(d);
+    const curve = P.curve_r.map((r, k) => ({r, p: P.curve_p[k]})), L = P.r.map((r, k) => ({r, p: P.pr[k]}));
+    const xd = linDom(curve.map(p => p.r).concat(L.map(p => p.r))), yd = linDom(curve.map(p => p.p).concat(L.map(p => p.p)));
+    d.append(Plot.plot(base(el, {width: Math.max(220, (el.clientWidth - 24) / (el.clientWidth > 700 ? 3 : 1)), height: 240, marginLeft: 50,
+      x: {domain: xd, label: 'r →'}, y: {domain: yd, label: '↑ p_r'},
+      marks: [Plot.line(curve, {x: 'r', y: 'p', stroke: tok('--ink'), strokeWidth: 1.4}), Plot.dot(L, {x: 'r', y: 'p', r: 1.3, fill: tok('--s3')}),
+        Plot.text([`J_r ${P.J[0].toFixed(3)}, L ${P.J[1].toFixed(3)}`], {frameAnchor: 'top-right', dx: -4, dy: 4, fill: tok('--ink-2'), fontFamily: 'Archivo, sans-serif'})]})));
+  });
+  return w;
+});
+chart('fig-wander', el => {
+  const W = DATA.isochrone.worst;
+  const rows = W.phi.map((p, i) => ({p, z: W.thz[i], d: W.dL[i]}));
+  const m = d3.quantile(rows.map(r => Math.abs(r.d)).sort(d3.ascending), 0.98);
+  const md = W.modes.map(o => `(${o.k.join(', ')})`).join(', ');
+  $('#wander-cap').innerHTML = `The torus with the largest angular-momentum wander: J_r = ${W.J[0].toFixed(3)}, L = ${W.J[1].toFixed(3)}, Ω_r/Ω_L = ${W.ratio.toFixed(3)}. On a true torus |x × v| = L everywhere. Here it varies by ${fmt(W.wander)} (standard deviation, relative to J_r + L), against an energy variation of ${fmt(W.energy)}. Each dot is one of the torus's 1,024 held-out points, placed by two angle combinations and coloured by its |L| error. A fit of low Fourier modes in the three toy angles finds the strongest modes (k_r, k_L, k_z) = ${md}, all with k·Ω = ${W.modes[0].kOmega.toFixed(3)}, almost zero: they combine θ_r − 2θ_L (near the 2:1 resonance) with the node angle θ_z (whose frequency is exactly zero in a spherical potential). These low modes explain ${Math.round(100 * W.explained)}% of the error. Deforming a torus along such slow angle combinations hardly changes its energy, so the energy loss barely penalises it.`;
+  const p = Plot.plot(base(el, {height: 320, x: {domain: [0, 2 * Math.PI], label: 'θ_r − 2θ_L →', ticks: [0, Math.PI, 2 * Math.PI], tickFormat: d => ['0', 'π', '2π'][Math.round(d / Math.PI)]},
+    y: {domain: [0, 2 * Math.PI], label: '↑ node angle θ_z', ticks: [0, Math.PI, 2 * Math.PI], tickFormat: d => ['0', 'π', '2π'][Math.round(d / Math.PI)]},
+    color: {type: 'diverging', scheme: 'RdBu', domain: [-m, m], legend: true, label: '(|x × v| − L) / (J_r + L)', tickFormat: '.0e'},
+    marks: [Plot.dot(rows, {x: 'p', y: 'z', r: 3, fill: 'd'})]}));
+  return p;
+});
+/* ---------- invariance experiment ---------- */
+(function () {
+  const I = DATA.invariance, host = $('#inv-block');
+  if (!I) { host.innerHTML = '<p class="pending">Running on the laptop; results appear here when both fine-tunes finish.</p>'; return; }
+  const cols = [['start', 'Trained isochrone (start)'], ['energy_only', '+30 LM steps, energy loss only'], ['energy_plus_invariance', '+30 LM steps, energy + invariance']].filter(c => I[c[0]]);
+  const rows = [['energy_err', 'Held-out energy error (mean)'], ['energy_err_max', 'Held-out energy error (max)'], ['invariance_rms', 'Invariance residual (rms)'],
+    ['L_wander_median', 'Angular-momentum wander around each torus, relative to L (median)'], ['L_wander_max', 'Angular-momentum wander relative to L (worst torus)'],
+    ['torus_E_err_max', 'Torus-mean energy vs exact H(J) (max)'], ['freq_err_max', 'Frequencies vs exact (max)']];
+  host.innerHTML = `<div class="fig"><h3>Before and after</h3><div class="tablewrap"><table><thead><tr><th>Held-out metric</th>${cols.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(([k, l]) => `<tr><td>${l}</td>${cols.map(c => `<td class="num">${fmt(I[c[0]][k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="cap">Same held-out tori and angles as everywhere else. The invariance run optimises a different objective, so its energy error alone does not tell the story; the angular-momentum wander is the independent check, since the loss never sees L.</div></div>
+    <div class="fig"><h3>Angular-momentum wander per torus, against the resonance ratio</h3><div class="plot" id="fig-inv-scatter"></div>
+    <div class="cap">One dot per held-out torus. Ω_r/Ω_L runs from 1 (Keplerian) to 2 (harmonic); the oscillator toy is exactly 2:1, and the ratio approaches 2 as L → 0, so the right edge is also the low-L, nearly radial tori.</div></div>`;
+  chart('fig-inv-scatter', el => {
+    const S = [['isochrone', 'trained isochrone (start)', '--muted'], ['isochrone_energy_only', '+30 LM steps, energy loss only', '--s2'], ['isochrone_energy_plus_invariance', '+30 LM steps, energy + invariance', '--s7']].filter(s => DATA[s[0]]);
+    const rows = S.flatMap(([k, l, c]) => DATA[k].per_torus.wander.map((wv, i) => ({x: DATA[k].per_torus.ratio[i], y: wv, k, c, l})));
+    const p = Plot.plot(base(el, {height: 300, x: {label: 'Ω_r / Ω_L →', domain: linDom(rows.map(r => r.x))}, y: {type: 'log', domain: logDom(rows.map(r => r.y), 1.5), label: '↑ std of |x × v| around the torus / (J_r + L)'},
+      marks: [Plot.dot(rows, {x: 'x', y: 'y', r: 2.6, fill: d => tok(d.c), fillOpacity: .85, tip: true, title: d => `${d.l}\nΩ_r/Ω_L ${d.x.toFixed(3)}: ${fmt(d.y)}`})]}));
+    const w = document.createElement('div'); w.innerHTML = legend(S.map(([k, l, c]) => [tok(c), l])); w.append(p); return w;
+  });
+})();
+
+/* ---------- decisions ---------- */
+$('#decisions').innerHTML = [
+  ['New 6D layers, not the repo’s conditioners', 'In 3D a shear q ← q + f(p) is symplectic only if f is a gradient. The repo’s conditioners output independent components with per-component gates, which breaks that. The flow here uses SympNet gradient shears with a single gate, plus linear symmetric shears that can represent any linear symplectic map exactly.'],
+  ['Toys matched to the torus topology', 'A Cartesian oscillator (actions J_x, J_y, J_z) for box-like targets, and an oscillator in spherical actions (J_r, L, L_z) for spherical ones. A Cartesian toy cannot be mapped smoothly onto a spherical potential’s tori, whose labels and degenerate edges differ.'],
+  ['Potentials in torch for now, galpy later', 'PR 1 uses galpy’s torch backend, which is only on galpy’s development branches. These first targets are written in torch; galpy’s development branch will be installed in an isolated environment for MWPotential2014 in 3D.'],
+  ['Fit the linear part first', 'On the oscillator target, linear shears alone reach 2.6×10⁻¹⁶ in 15 LM steps, while the same fit with unneeded nonlinear layers crawls (2.7×10⁻⁸ after 300 steps) as LM drives their gates to zero. Models should grow: linear first, then nonlinear layers on top.'],
+  ['Keep the torus grid', 'Spending the same residual budget on 1,000 scattered tori with 32 angles each reduced overfitting but slowed the fit; at equal steps the 125-torus grid with 256 angles is slightly ahead.'],
+  ['Add an invariance residual', 'The energy loss is weak near resonances (section 3). Requiring Hamilton’s equations on the torus constrains those deformations directly and needs no other known integrals, which matters for potentials where only L_z is known.'],
+].map(([b, s]) => `<div><b>${b}</b><span>${s}</span></div>`).join('');
+
+renderAll();
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
+new MutationObserver(renderAll).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+</script>
