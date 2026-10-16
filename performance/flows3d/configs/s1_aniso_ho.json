@@ -1,0 +1,49 @@
+{
+ "toy": {
+  "omegas": [
+   1.4,
+   1.4,
+   1.4
+  ]
+ },
+ "data": {
+  "n_per_axis": 5,
+  "J_lo": [
+   0.001,
+   0.001,
+   0.001
+  ],
+  "J_hi": [
+   1.0,
+   1.0,
+   1.0
+  ],
+  "n_angles": 256
+ },
+ "model": {
+  "n_lin": 2,
+  "n_blocks": 4,
+  "width": 16,
+  "gate_std": 0.001
+ },
+ "adam": {
+  "steps": 300,
+  "lr": 0.001
+ },
+ "seed": 0,
+ "threads": 4,
+ "name": "s1_aniso_ho",
+ "target": {
+  "kind": "aniso_ho",
+  "omegas": [
+   1.0,
+   1.4,
+   1.9
+  ]
+ },
+ "lm": {
+  "max_iters": 300,
+  "geodesic": true,
+  "every": 10
+ }
+}

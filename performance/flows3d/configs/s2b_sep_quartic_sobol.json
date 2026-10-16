@@ -1,0 +1,57 @@
+{
+ "toy": {
+  "omegas": [
+   1.0,
+   1.4,
+   1.9
+  ]
+ },
+ "data": {
+  "n_per_axis": 5,
+  "J_lo": [
+   0.001,
+   0.001,
+   0.001
+  ],
+  "J_hi": [
+   1.0,
+   1.0,
+   1.0
+  ],
+  "n_angles": 32,
+  "tori": "sobol",
+  "n_tori": 1000
+ },
+ "model": {
+  "n_lin": 2,
+  "n_blocks": 8,
+  "width": 32,
+  "gate_std": 0.001
+ },
+ "adam": {
+  "steps": 1000,
+  "lr": 0.001
+ },
+ "seed": 0,
+ "threads": 4,
+ "name": "s2b_sep_quartic_sobol",
+ "target": {
+  "kind": "sep_quartic",
+  "omegas": [
+   1.0,
+   1.4,
+   1.9
+  ],
+  "lams": [
+   1.5,
+   2.5,
+   4.0
+  ]
+ },
+ "lm": {
+  "max_iters": 120,
+  "geodesic": true,
+  "every": 10,
+  "chunk": 64
+ }
+}
