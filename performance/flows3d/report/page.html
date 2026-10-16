@@ -84,6 +84,15 @@ td.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums; white-space
 .log b{font-family:var(--f-display); font-size:var(--step--1)}
 .log span{font-size:var(--step--1); color:var(--ink-2)}
 .pending{color:var(--muted); font-style:italic; font-size:var(--step--1)}
+.specs{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px}
+@media (max-width:900px){.specs{grid-template-columns:minmax(0,1fr)}}
+.spec{background:var(--surface); border:1px solid var(--rule); border-radius:12px; padding:16px; display:grid; gap:10px; align-content:start; min-width:0}
+.spec .tag{font-family:var(--f-display); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; font-weight:700}
+.spec dl{margin:0; display:grid; gap:8px}
+.spec dt{font-family:var(--f-display); font-size:.72rem; letter-spacing:.05em; text-transform:uppercase; color:var(--muted)}
+.spec dd{margin:0; font-size:var(--step--1); line-height:1.5}
+.eq{font-family:var(--f-body); font-style:italic; white-space:normal}
+.extra{background:var(--surface); border:1px solid var(--rule); border-radius:12px; padding:14px 16px; font-size:var(--step--1); display:grid; gap:6px}
 </style>
 <div class="wrap">
   <header class="head">
@@ -99,10 +108,47 @@ td.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums; white-space
     <div class="prose" id="summary"></div>
   </section>
 
+  <section id="problems">
+    <div class="eyebrow">The test problems</div>
+    <h2>What each stage trains</h2>
+    <div class="prose"><p>Every stage learns the same kind of map: (θ, J) → a <b>toy</b> torus with actions J → a 6D symplectic flow → (x, v), trained until each image torus has constant energy in the <b>target</b> potential. The stages differ in the target, the toy, and therefore in what the exact answer is. Units are natural (G = 1); all runs are float64 on the laptop.</p></div>
+    <div class="specs">
+      <div class="spec"><div class="tag" style="color:var(--s1)">Stage 1 · anisotropic oscillator</div><dl>
+        <dt>Target</dt><dd><span class="eq">H = ½|v|² + ½ Σ<sub>i</sub> ω<sub>i</sub>² x<sub>i</sub>²</span>, with ω = (1, 1.4, 1.9): a different frequency along each axis.</dd>
+        <dt>Toy</dt><dd>Cartesian oscillator with the <i>same</i> frequency 1.4 on all three axes: <span class="eq">x<sub>i</sub> = √(2J<sub>i</sub>/ω) cos θ<sub>i</sub>, v<sub>i</sub> = −√(2J<sub>i</sub>ω) sin θ<sub>i</sub></span>.</dd>
+        <dt>Exact answer</dt><dd>A linear map: stretch each axis by √(1.4/ω<sub>i</sub>) in x and its inverse in v. The flow's linear layers can represent it exactly.</dd>
+        <dt>Ground truth</dt><dd><span class="eq">E(J) = Σ ω<sub>i</sub> J<sub>i</sub></span>, frequencies ω<sub>i</sub>.</dd>
+        <dt>Training tori</dt><dd>5 per axis, J<sub>i</sub> from 10⁻³ to 1 (geometric): 125 tori × 256 angles.</dd>
+        <dt>Flow</dt><dd>2 pairs of linear shears + 4 pairs of nonlinear shears of width 16: 684 parameters. Also run with the linear shears alone (36 parameters).</dd>
+        <dt>Training</dt><dd>300 Adam steps, then 300 Levenberg–Marquardt steps; 6 minutes.</dd></dl></div>
+      <div class="spec"><div class="tag" style="color:var(--s2)">Stage 2 · separable quartic</div><dl>
+        <dt>Target</dt><dd><span class="eq">H = ½|v|² + Σ<sub>i</sub> (½ ω<sub>i</sub>² x<sub>i</sub>² + ¼ λ<sub>i</sub> x<sub>i</sub>⁴)</span>, with ω = (1, 1.4, 1.9) and λ = (1.5, 2.5, 4). Each axis moves independently in its own anharmonic well; at J = 1 the frequencies are 30–57% above ω.</dd>
+        <dt>Toy</dt><dd>Cartesian oscillator with frequencies ω = (1, 1.4, 1.9), the target's small-amplitude limit.</dd>
+        <dt>Exact answer</dt><dd>Nonlinear, but a product of three independent 1D maps, one per axis. The 6D flow couples all coordinates, so it has to discover that separation.</dd>
+        <dt>Ground truth</dt><dd>Each axis's energy E<sub>i</sub>(J<sub>i</sub>) and frequency by Gauss–Legendre quadrature (round trip good to 4×10⁻¹⁶).</dd>
+        <dt>Training tori</dt><dd>Same 125-torus grid × 256 angles. A variant spends the same budget on 1,000 scattered tori × 32 angles.</dd>
+        <dt>Flow</dt><dd>2 linear pairs + 8 nonlinear pairs of width 32: 2,612 parameters.</dd>
+        <dt>Training</dt><dd>1,000 Adam steps, then 200 LM steps (the variant: 120); 22 minutes.</dd></dl></div>
+      <div class="spec"><div class="tag" style="color:var(--s3)">Stage 3 · isochrone</div><dl>
+        <dt>Target</dt><dd>The isochrone, a spherical potential <span class="eq">Φ(r) = −GM / (b + √(b² + r²))</span>, GM = b = 1. A genuinely 3D problem: not separable in Cartesian coordinates, orbits are rosettes in tilted planes. The radial frequency falls 3× across the training range.</dd>
+        <dt>Toy</dt><dd>Isotropic oscillator with ω = 0.5 (the isochrone's frequency at its centre), written in spherical actions (J<sub>r</sub>, L, L<sub>z</sub>): a centred ellipse in a tilted orbital plane. Its tori are labelled the same way as the isochrone's.</dd>
+        <dt>Exact answer</dt><dd>A nonlinear map from oscillator tori onto isochrone tori with the same (J<sub>r</sub>, L, L<sub>z</sub>).</dd>
+        <dt>Ground truth</dt><dd>Analytic: <span class="eq">H = −(GM)² / (2 [J<sub>r</sub> + ½(L + √(L² + 4GMb))]²)</span>, with analytic frequencies. On a true torus |x × v| = L everywhere, which gives an independent check.</dd>
+        <dt>Training tori</dt><dd>5 per axis in J<sub>r</sub> from 10⁻³ to 0.2 and L from 10⁻² to 0.5 (geometric), and cos i from −0.9 to 0.9 (uniform), so L<sub>z</sub> = L cos i: 125 tori × 256 angles.</dd>
+        <dt>Flow</dt><dd>Same as stage 2: 2,612 parameters.</dd>
+        <dt>Training</dt><dd>1,000 Adam steps, then 200 LM steps; 23 minutes.</dd></dl></div>
+    </div>
+    <div class="extra"><b>Common to all stages.</b>
+      <span>Loss: on each torus, the variance of H over its angle samples, divided by the toy energy of that torus, a fixed scale that cannot be gamed.</span>
+      <span>Held-out set: tori halfway (in log J) between the training tori, at 1,024 independent quasi-random angles; never used in training.</span>
+      <span>Reported error: mean of |H − ⟨H⟩| / (⟨H⟩ − Φ<sub>min</sub>) over the held-out points, so energies are measured from the bottom of the potential.</span>
+      <span>Section 4's experiment starts from the trained stage-3 model and runs 30 more LM steps twice: once with the energy loss alone (the control), once with the energy loss plus the invariance residual.</span></div>
+  </section>
+
   <section id="sanity">
     <div class="eyebrow">1 · Sanity checks</div>
     <h2>The pieces are exact before training starts</h2>
-    <p class="prose">Every check below is recomputed from the current code each time this page is built. "Expected" is the size of float64 round-off, or the known accuracy of the comparison.</p>
+    <div class="prose"><p>Every check below is recomputed from the current code each time this page is built. "Expected" is the size of float64 round-off, or the known accuracy of the comparison.</p></div>
     <div class="tablewrap" id="sanity-table"></div>
   </section>
 
@@ -294,7 +340,8 @@ chart('fig-wander', el => {
 $('#decisions').innerHTML = [
   ['New 6D layers, not the repo’s conditioners', 'In 3D a shear q ← q + f(p) is symplectic only if f is a gradient. The repo’s conditioners output independent components with per-component gates, which breaks that. The flow here uses SympNet gradient shears with a single gate, plus linear symmetric shears that can represent any linear symplectic map exactly.'],
   ['Toys matched to the torus topology', 'A Cartesian oscillator (actions J_x, J_y, J_z) for box-like targets, and an oscillator in spherical actions (J_r, L, L_z) for spherical ones. A Cartesian toy cannot be mapped smoothly onto a spherical potential’s tori, whose labels and degenerate edges differ.'],
-  ['Potentials in torch for now, galpy later', 'PR 1 uses galpy’s torch backend, which is only on galpy’s development branches. These first targets are written in torch; galpy’s development branch will be installed in an isolated environment for MWPotential2014 in 3D.'],
+  ['Potentials in torch for now, galpy later', 'PR 1 uses galpy’s torch backend, which is only on galpy’s development branches. These first targets are written directly in torch.'],
+  ['galpy’s torch MWPotential2014 is the ground truth for 3D MW work', 'galpy 1.12.1.dev0 (branch backend/feat-backends-onto-main) is installed in ~/.venvs/galpy-dev, separate from the base environment. Its torch backend gives differentiable MWPotential2014 values, 9 ms for 32k points with gradients; disk and halo match galpy’s numpy path to round-off. Its bulge differs from the numpy path by 2–3×10⁻⁸ (checked against 40-digit quadrature, where the numpy path is exact). Decision (yours): the torch backend defines the target, so that difference is part of the definition rather than an error; it is noted here in case galpy changes it.'],
   ['Fit the linear part first', 'On the oscillator target, linear shears alone reach 2.6×10⁻¹⁶ in 15 LM steps, while the same fit with unneeded nonlinear layers crawls (2.7×10⁻⁸ after 300 steps) as LM drives their gates to zero. Models should grow: linear first, then nonlinear layers on top.'],
   ['Keep the torus grid', 'Spending the same residual budget on 1,000 scattered tori with 32 angles each reduced overfitting but slowed the fit; at equal steps the 125-torus grid with 256 angles is slightly ahead.'],
   ['Add an invariance residual', 'The energy loss is weak near resonances (section 3). Requiring Hamilton’s equations on the torus constrains those deformations directly and needs no other known integrals, which matters for potentials where only L_z is known.'],
