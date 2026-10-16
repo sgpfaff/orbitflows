@@ -178,9 +178,9 @@ td.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums; white-space
   </section>
 
   <section id="invariance">
-    <div class="eyebrow">4 · Experiment in progress</div>
+    <div class="eyebrow">4 · First test of a fix</div>
     <h2>Adding an invariance residual</h2>
-    <div class="prose"><p>On a true torus, the system's own motion carries every point along the torus at fixed frequencies: X<sub>H</sub>(z) = Σ<sub>i</sub> Ω<sub>i</sub> ∂z/∂θ<sub>i</sub>. The new residual measures how far each point is from that, with Ω fitted per torus by least squares. It is zero for the exact maps above (sanity checks), and on the trained isochrone it is 8× the energy error. Starting from the trained isochrone model, two 30-step Levenberg–Marquardt runs compare the energy loss alone against energy plus invariance.</p></div>
+    <div class="prose"><p>On a true torus, the system's own motion carries every point along the torus at fixed frequencies: X<sub>H</sub>(z) = Σ<sub>i</sub> Ω<sub>i</sub> ∂z/∂θ<sub>i</sub>. The new residual measures how far each point is from that, with Ω fitted per torus by least squares. It is zero for the exact maps above (sanity checks), and on the trained isochrone it is 8× the energy error. Starting from the trained isochrone model, two 30-step Levenberg–Marquardt runs compare the energy loss alone against energy plus invariance (equal weights).</p><p id="inv-verdict"></p></div>
     <div id="inv-block"></div>
   </section>
 
@@ -324,13 +324,15 @@ chart('fig-wander', el => {
     ['torus_E_err_max', 'Torus-mean energy vs exact H(J) (max)'], ['freq_err_max', 'Frequencies vs exact (max)']];
   host.innerHTML = `<div class="fig"><h3>Before and after</h3><div class="tablewrap"><table><thead><tr><th>Held-out metric</th>${cols.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>
     ${rows.map(([k, l]) => `<tr><td>${l}</td>${cols.map(c => `<td class="num">${fmt(I[c[0]][k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-    <div class="cap">Same held-out tori and angles as everywhere else. The invariance run optimises a different objective, so its energy error alone does not tell the story; the angular-momentum wander is the independent check, since the loss never sees L.</div></div>
+    <div class="cap">Same held-out tori and angles as everywhere else. The angular-momentum wander is the independent check, since neither loss sees L.</div></div>
     <div class="fig"><h3>Angular-momentum wander per torus, against the resonance ratio</h3><div class="plot" id="fig-inv-scatter"></div>
-    <div class="cap">One dot per held-out torus. Ω_r/Ω_L runs from 1 (Keplerian) to 2 (harmonic); the oscillator toy is exactly 2:1, and the ratio approaches 2 as L → 0, so the right edge is also the low-L, nearly radial tori.</div></div>`;
+    <div class="cap">One dot per held-out torus. Ω_r/Ω_L runs from 1 (Keplerian) to 2 (harmonic); the oscillator toy is exactly 2:1, and the ratio approaches 2 as L → 0, so the right edge is also the low-L, nearly radial tori. The ratio depends only on L, which takes four values on the held-out grid, hence the four columns.</div></div>`;
+  const c0 = I.energy_only, c1 = I.energy_plus_invariance;
+  if (c0 && c1) $('#inv-verdict').innerHTML = `<b>Result: no clear improvement yet.</b> Against the control, adding the invariance residual lowered the invariance residual itself (${fmt(c0.invariance_rms)} → ${fmt(c1.invariance_rms)}), the worst torus's angular-momentum wander (${fmt(c0.L_wander_max)} → ${fmt(c1.L_wander_max)}) and the largest torus-energy error (${fmt(c0.torus_E_err_max)} → ${fmt(c1.torus_E_err_max)}). But the typical wander did not improve (median ${fmt(c0.L_wander_median)} → ${fmt(c1.L_wander_median)}), and the mean energy error rose (${fmt(c0.energy_err)} → ${fmt(c1.energy_err)}). The invariance residual is about 8× the energy residual at the start, so with equal weights it dominates the loss and the optimiser trades energy accuracy for it. Thirty plain LM steps (53 s each) is also a small budget. Next tries: a smaller weight, geodesic acceleration, and longer runs off the laptop; and, for spherical and axisymmetric targets, adding the known integrals |L| and L_z directly.`;
   chart('fig-inv-scatter', el => {
     const S = [['isochrone', 'trained isochrone (start)', '--muted'], ['isochrone_energy_only', '+30 LM steps, energy loss only', '--s2'], ['isochrone_energy_plus_invariance', '+30 LM steps, energy + invariance', '--s7']].filter(s => DATA[s[0]]);
     const rows = S.flatMap(([k, l, c]) => DATA[k].per_torus.wander.map((wv, i) => ({x: DATA[k].per_torus.ratio[i], y: wv, k, c, l})));
-    const p = Plot.plot(base(el, {height: 300, x: {label: 'Ω_r / Ω_L →', domain: linDom(rows.map(r => r.x))}, y: {type: 'log', domain: logDom(rows.map(r => r.y), 1.5), label: '↑ std of |x × v| around the torus / (J_r + L)'},
+    const p = Plot.plot(base(el, {height: 300, x: {label: 'Ω_r / Ω_L →', domain: linDom(rows.map(r => r.x))}, y: {type: 'log', domain: logDom(rows.map(r => r.y), 1.5), label: '↑ std of |x × v| around the torus / (J_r + L)', tickFormat: '.0e'},
       marks: [Plot.dot(rows, {x: 'x', y: 'y', r: 2.6, fill: d => tok(d.c), fillOpacity: .85, tip: true, title: d => `${d.l}\nΩ_r/Ω_L ${d.x.toFixed(3)}: ${fmt(d.y)}`})]}));
     const w = document.createElement('div'); w.innerHTML = legend(S.map(([k, l, c]) => [tok(c), l])); w.append(p); return w;
   });
