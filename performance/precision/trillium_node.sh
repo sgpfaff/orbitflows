@@ -18,20 +18,15 @@
 # Each segment resumes unfinished jobs from their checkpoints; the 68 h LM caps count across segments. Ten minutes
 # before the time limit Slurm sends SIGTERM, the queue stops its workers, and they lose at most 25 LM steps.
 #
-# Python environment: by default this runs your `ml_env` alias from ~/.bashrc. If that fails in a batch job,
-# submit with ENV_ACTIVATE=/path/to/venv/bin/activate sbatch trillium_node.sh
+# Python environment: the virtualenv behind the `ml_env` alias. Batch jobs on Trillium do not inherit the
+# submitting shell's environment (and aliases are not available), so the path is set here; edit it if needed.
+ENV_ACTIVATE="$HOME/.virtualenvs/ml_env/bin/activate"
 
 cd "$SLURM_SUBMIT_DIR"
 module load gcc arrow/24.0.0
-if [ -n "$ENV_ACTIVATE" ]; then
-    source "$ENV_ACTIVATE"
-else
-    shopt -s expand_aliases
-    source ~/.bashrc
-    ml_env
-fi
+source "$ENV_ACTIVATE"
 python -c "import torch, orbitflows; print('torch', torch.__version__)" \
-    || { echo "Python environment not found: submit with ENV_ACTIVATE=/path/to/venv/bin/activate"; exit 1; }
+    || { echo "Python environment not found: edit ENV_ACTIVATE in trillium_node.sh"; exit 1; }
 
 # pin workers to cores only when logical CPUs are physical cores (no SMT siblings to collide on)
 PIN=""
