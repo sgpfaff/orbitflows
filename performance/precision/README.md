@@ -76,6 +76,25 @@ results/<batch>/<name>/config.json   the job spec
 
 To stop, press Ctrl-C (or kill it, or let the allocation end). To resume, run the same command: finished jobs are skipped and the others continue from their last checkpoint, losing at most 25 LM steps.
 
+## A whole Trillium node
+
+Trillium schedules only whole nodes (192 cores, at most 24 h per job). One LM step barely speeds up with more threads (1.8 s on 1 thread, 1.2 s on 4), so a node is best used by many 4-thread jobs. `trillium_node.sh` runs the current bundle, 45 jobs, in priority order:
+
+- `anchor`, `anchor_geo`, `toygeo`: the toy-frequency study, with pinned, free and fixed frequency (fixed is `mwgeo`).
+- `mwgeo`, `mwteacher`: the real MW and the MW teacher.
+- `ladder2`: rungs C and B.
+- `capprobe`: the capacity probe.
+
+Each job gets its own 4 cores, two per 8-core L3 cache. The 68 h jobs span three chained 24 h segments:
+
+```bash
+sbatch -p debug --time=00:30:00 trillium_node.sh     # optional 30-minute test
+sbatch trillium_node.sh
+sbatch --dependency=singleton trillium_node.sh       # x2: each waits for the previous segment
+```
+
+Unfinished jobs resume from their checkpoints at the start of each segment. Slurm's output goes to `results/slurm_<jobid>.out`; the queue's status table is in `results/queue_status.txt`.
+
 ## Collect and copy back
 
 ```bash

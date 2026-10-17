@@ -45,6 +45,8 @@ def main():
     ap.add_argument("--out", default=os.path.join(HERE, "results"))
     ap.add_argument("--status", type=int, default=120)
     ap.add_argument("--only", default=None, help="substring filter on job names")
+    ap.add_argument("--pin", action="store_true",
+                    help="pin each worker slot to its own block of --threads cores (Linux; keeps a job's threads on one L3)")
     a = ap.parse_args()
 
     todo = []
@@ -63,13 +65,21 @@ def main():
     env = dict(os.environ, NTHREADS=str(a.threads), OMP_NUM_THREADS=str(a.threads), MKL_NUM_THREADS=str(a.threads),
                OPENBLAS_NUM_THREADS=str(a.threads), KMP_DUPLICATE_LIB_OK="TRUE")
     running, failed = {}, []
+    cpus = sorted(os.sched_getaffinity(0)) if a.pin else []
+    free_slots = list(range(a.workers))
+
+    def pin_to(slot):
+        cores = cpus[slot * a.threads:(slot + 1) * a.threads]
+        if len(cores) < a.threads:
+            return None
+        return lambda: os.sched_setaffinity(0, cores)
 
     def stop_all(*_):
         print("\nstopping workers (jobs resume from their last checkpoint on the next run)", flush=True)
-        for p, _ in running.values():
+        for p, *_ in running.values():
             p.send_signal(signal.SIGTERM)
         time.sleep(3)
-        for p, _ in running.values():
+        for p, *_ in running.values():
             if p.poll() is None:
                 p.kill()
         sys.exit(130)
@@ -82,13 +92,15 @@ def main():
             jf, k, spec = pending.pop(0)
             os.makedirs(jdir(spec), exist_ok=True)
             log = open(os.path.join(jdir(spec), "stdout.log"), "a")
+            slot = free_slots.pop(0)
             p = subprocess.Popen([sys.executable, "-u", os.path.join(HERE, "run.py"), jf, "--line", str(k), "--out", a.out],
-                                 stdout=log, stderr=subprocess.STDOUT, env=env)
-            running[spec["name"]] = (p, spec)
+                                 stdout=log, stderr=subprocess.STDOUT, env=env, preexec_fn=pin_to(slot) if a.pin else None)
+            running[spec["name"]] = (p, spec, slot)
             print(f"{time.strftime('%H:%M:%S')} start {spec['name']}", flush=True)
         for name in list(running):
-            p, spec = running[name]
+            p, spec, slot = running[name]
             if p.poll() is not None:
+                free_slots.append(slot)
                 ok = p.returncode == 0 and os.path.exists(os.path.join(jdir(spec), "DONE"))
                 print(f"{time.strftime('%H:%M:%S')} {'done' if ok else 'FAILED (see stdout.log)'} {name}", flush=True)
                 if not ok:

@@ -15,7 +15,7 @@ Batches
              standard conditioners, 3 seeds -> 6 jobs. The recipe batch found learned omega best above ~1 kpc but
              ~10x worse near the midplane, where omega drifted to ~1.2 instead of nu0; this tests the fix.
              LM wall cap 68 h, to fit one 72 h Trillium OnDemand session.
-  mwteacher: fresh 16 x 64 students (geodesic-accelerated LM) trained on an MW teacher, the Hamiltonian of the best MW model
+  mwteacher: fresh 16 x 64 students (geodesic and plain LM, 3 seeds each) trained on an MW teacher, the Hamiltonian of the best MW model
              (teachers/mw_fixed_std_s1.pt, 1.2e-5 from the real MW tori), same data, toy and recipe as the MW runs,
              3 seeds, 68 h LM cap. The student can represent the teacher exactly, so this measures how far the
              optimiser gets on a map of MW's complexity: if students go far below 1e-5, the MW error is
@@ -25,7 +25,13 @@ Batches
              68 h: the comparison for mwteacher, and the next best-model attempt.
   ladder2  : rung C again, now exactly realisable (the old runs' toy frequency was float32-rounded, 1.2e-8 off
              the teacher's, which the student had to absorb as a tiny linear squeeze), standard vs geodesic LM,
-             3 seeds each, 68 h. The precision-track baseline.
+             3 seeds each, 68 h, plus rung B with geodesic LM. The precision-track baseline.
+  anchor_geo, toygeo : the toy-frequency study again with geodesic LM, to compare with mwgeo (fixed nu0):
+             anchor_geo = pinned omega (value, value_slope) x 3 seeds; toygeo = free learned omega x 3 seeds.
+  capprobe : a small capacity probe with geodesic LM, depth vs width at ~1.5k (8 x 64, 16 x 32), ~3.1k (8 x 128,
+             32 x 32, and mwgeo's 16 x 64) and ~6.2k parameters (16 x 128, 32 x 64), 2 seeds.
+             Read it together with mwteacher: it only measures the model if the students show the optimiser
+             is not the limit at these error levels.
   ladder   : (A) SHO with the exact toy: the answer is the identity, which the flow represents exactly;
              (B) SHO with a wrong toy frequency: the answer is a linear rescaling, which tanh shears reach
                  only in a limit (small inner weights, large outer ones);
@@ -82,11 +88,24 @@ def main():
         for anc, tag in (("value", "val"), ("value_slope", "vs")) for s in range(3)]
 
     long_geo = lambda: stages(p, polish_hours=68.0, stall_window=1000, stall_rtol=1e-5, geodesic=True)
+    long_std = lambda: stages(p, polish_hours=68.0, stall_window=1000, stall_rtol=1e-5)
     batches["mwteacher"] = [
-        job(f"mwt_geo_s{s}", "mwteacher", p, target="teacher", teacher=dict(checkpoint="teachers/mw_fixed_std_s1.pt"),
-            seed=s, stages=long_geo())
-        for s in range(3)]
+        job(f"mwt_{tag}_s{s}", "mwteacher", p, target="teacher", teacher=dict(checkpoint="teachers/mw_fixed_std_s1.pt"),
+            seed=s, stages=st())
+        for st, tag in ((long_geo, "geo"), (long_std, "std")) for s in range(3)]
     batches["mwgeo"] = [job(f"mw_geo_s{s}", "mwgeo", p, seed=s, stages=long_geo()) for s in range(3)]
+
+    batches["anchor_geo"] = [
+        job(f"anc_geo_{tag}_s{s}", "anchor_geo", p, toy=dict(mode="learned", omega="nu0", n_cheb=6, anchor=anc), seed=s,
+            stages=long_geo())
+        for anc, tag in (("value", "val"), ("value_slope", "vs")) for s in range(3)]
+    batches["toygeo"] = [
+        job(f"lrn_geo_s{s}", "toygeo", p, toy=dict(mode="learned", omega="nu0", n_cheb=6), seed=s, stages=long_geo())
+        for s in range(3)]
+    # depth vs width at three fixed sizes (~1.5k, ~3.1k, ~6.2k parameters; mwgeo is the 16 x 64 point)
+    batches["capprobe"] = [
+        job(f"cap_L{L}_w{w}_geo_s{s}", "capprobe", p, model=dict(n_layers=L, width=w), seed=s, stages=long_geo())
+        for L, w in ((8, 64), (16, 32), (8, 128), (32, 32), (16, 128), (32, 64)) for s in range(2)]
 
     toy = dict(mode=a.toy, omega="nu0", n_cheb=6)
     batches["capacity"] = [
@@ -109,6 +128,10 @@ def main():
         job(f"lad2_C_{tag}_s{s}", "ladder2", p, target="teacher", toy=dict(mode="fixed", omega=1.5), teacher=teacher_C,
             data=LADDER_DATA, seed=s, stages=stages(p, polish_hours=68.0, stall_window=1000, stall_rtol=1e-5, geodesic=geo))
         for geo, tag in ((False, "std"), (True, "geo")) for s in range(3)]
+    batches["ladder2"] += [  # rung B with geodesic LM (the old ladder has B with plain LM)
+        job(f"lad2_B_geo_s{s}", "ladder2", p, target="sho", omega_target=1.0, toy=dict(mode="fixed", omega=1.5),
+            data=LADDER_DATA, seed=s, stages=stages(p, polish_hours=68.0, stall_window=1000, stall_rtol=1e-5, geodesic=True))
+        for s in range(3)]
 
     for b, jobs in batches.items():
         path = os.path.join(HERE, "jobs", f"{b}_{p}.jsonl")
