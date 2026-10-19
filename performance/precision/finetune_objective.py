@@ -53,6 +53,10 @@ def main():
     ap.add_argument("objective"); ap.add_argument("steps", type=int); ap.add_argument("out")
     ap.add_argument("--model", default="teachers/mw_32x32_a256.pt"); ap.add_argument("--angles", type=int, default=256)
     ap.add_argument("--every", type=int, default=25)
+    ap.add_argument("--init", default=None, help="continue from a state.pt written by an earlier run of this script")
+    ap.add_argument("--hours", type=float, default=None, help="wall-time cap")
+    ap.add_argument("--ckpt-every", type=int, default=50)
+    ap.add_argument("--lam0", type=float, default=1e-4)
     a = ap.parse_args()
     ck = torch.load(os.path.join(HERE, a.model), weights_only=False)
     mw = C.MWVertical(); w0 = float(ck["omega"])
@@ -63,11 +67,15 @@ def main():
     m = C.build_model(ck["model"], cfg["toy"], w0, Jlo, Jhi, 0)
     with torch.no_grad():
         m.flow.load_state_dict(ck["flow_state"])
+    it0 = 0
+    if a.init:
+        sti = torch.load(a.init, weights_only=False); m.load_state_dict(sti["state"]); it0 = int(sti.get("it", 0))
+        print(f"continuing from {a.init} (step {it0})", flush=True)
     Jt = C.train_grid(MW, Jlo, Jhi, w0); nO, nS = len(Jt), a.angles
     aa = C.aa_points(Jt, C.angles(nS, 0.5)); es = (w0 * Jt).reshape(-1, 1)
     ev = C.Evaluator(cfg, mw, Jlo, Jhi, w0, Jt, nS)
     os.makedirs(a.out, exist_ok=True); json.dump(cfg, open(os.path.join(a.out, "config.json"), "w"), indent=1)
-    log = open(os.path.join(a.out, "log.jsonl"), "w"); t0 = time.perf_counter()
+    log = open(os.path.join(a.out, "log.jsonl"), "a"); t0 = time.perf_counter()
 
     def record(it, loss, lam):
         q = ev.quick(m)
@@ -76,10 +84,17 @@ def main():
         print(f"[{a.objective}] step {it:4d}  held-out {q['eval_mean']:.3e}  p99 {q['eval_p99']:.2e}  max {q['eval_max']:.2e}  "
               f"bands {q['band_0.005_0.15']:.1e} / {q['band_0.15_1']:.1e} / {q['band_1_9']:.1e}  train {q['train_mean']:.2e}  "
               f"{rec['t'] / 60:.1f} min", flush=True)
-    record(0, float("nan"), float("nan"))
+    record(it0, float("nan"), float("nan"))
     wfn, obj = make_objective(a.objective, nO, nS)
-    n, why, _ = C.train_lm(m, aa, mw, nO, nS, max_iters=a.steps, lam=1e-4, escale=es, geodesic=True, weight_fn=wfn, objective=obj,
-                           record=lambda it, l, lam: record(it + 1, l, lam) if (it + 1) % a.every == 0 else None, every=1)
+
+    def save(it, lam):
+        if (it - it0) % a.ckpt_every == 0:
+            tmp = os.path.join(a.out, "state.pt.tmp")
+            torch.save(dict(state=C.state_f64(m), it=it, lam=lam), tmp); os.replace(tmp, os.path.join(a.out, "state.pt"))
+    n, why, _ = C.train_lm(m, aa, mw, nO, nS, max_iters=a.steps, lam=a.lam0, escale=es, geodesic=True, weight_fn=wfn, objective=obj,
+                           record=lambda it, l, lam: record(it + 1, l, lam) if (it + 1 - it0) % a.every == 0 else None, every=1,
+                           ckpt=save, it0=it0, wall_cap=a.hours * 3600 if a.hours else None)
+    n += it0
     record(n, float("nan"), float("nan"))
     torch.save(dict(state=C.state_f64(m), it=n), os.path.join(a.out, "state.pt"))
     json.dump(dict(objective=a.objective, steps=n, stop=why, wall_s=time.perf_counter() - t0), open(os.path.join(a.out, "summary.json"), "w"))
