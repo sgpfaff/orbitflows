@@ -488,7 +488,7 @@ def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, esca
 
 def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ckpt=None, every=25,
              wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0, escale=None,
-             geodesic=False, geo_h=0.1, geo_alpha=0.75):
+             geodesic=False, geo_h=0.1, geo_alpha=0.75, weight_fn=None, objective=None):
     """Levenberg-Marquardt on r_i / sqrt(N). Per-point Jacobians of the model outputs (vmap of jacrev) on
     the model's device/dtype, chained analytically through H (float64, host) and the per-torus mean;
     J^T J and J^T r are accumulated over chunks of tori (memory O(chunk * P + P^2)) and solved in float64.
@@ -499,7 +499,15 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     directional derivative r_dd ~ (2/h)[(r(v + h d) - r(v))/h - J d] gives a = -(J^T J + lam D)^-1 J^T r_dd,
     and the step becomes d + a/2 when 2|a|_D/|d|_D <= geo_alpha. If the correction is too large, or the corrected
     step does not lower the loss, the plain step d is tried before lam is raised, so a geodesic step is never
-    worse than a plain one. Costs one or two extra residual evaluations and one vector-Jacobian product per trial."""
+    worse than a plain one. Costs one or two extra residual evaluations and one vector-Jacobian product per trial.
+
+    weight_fn(r, k) -> w: optional per-point weights (nO, nS), recomputed from the current residuals r (nO, nS)
+    at the start of every step k and held fixed within it; the step then minimises sum_i w_i r_i^2. This gives
+    iteratively reweighted least squares for other objectives (L_p, minimax by Lawson's method, per-torus
+    balance). The stall test compares objectives across steps, so pass stall_window=None with weights.
+    objective(r) -> float: optional objective of the unweighted residual vector r (N,), used to accept steps and
+    reported as the loss (default: half the weighted sum of squares). With reweighting, accepting on the true
+    objective (e.g. the L_p norm) keeps it monotone; the weighted step is then only a proposed direction."""
     from torch.func import functional_call, jacrev, vmap
     dev, dt = next(model.parameters()).device, next(model.parameters()).dtype
     names = [n for n, _ in model.named_parameters()]
@@ -533,6 +541,15 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
         r = ((H - m) / (escale if escale is not None else m.abs()) / sN).reshape(-1)
         return to_host64(torch.autograd.grad(r, vv, grad_outputs=u.to(r.dtype))[0])
 
+    sw = None  # sqrt of the per-point weights of the current step (host, flat), or None
+
+    def resid_w(v):
+        r = resid(v)
+        return r if sw is None else r * sw
+
+    def jtv_w(v, u):
+        return jtv(v, u if sw is None else sw * u)
+
     def normal_eqs(v):
         P = v.numel()
         A = torch.zeros(P, P, dtype=dt, device=dev); g = torch.zeros(P, dtype=dt, device=dev); rs = []
@@ -562,6 +579,9 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
             del Jy
             dm = dH.mean(1, keepdim=True)
             Jm = ((dH - dm) * c1[..., None] - c2[..., None] * dm).reshape(k * nS, -1)
+            if sw is not None:
+                swc = sw[o0 * nS:(o0 + k) * nS]
+                r = r * swc; Jm = Jm * to_dev(swc)[:, None]
             A += Jm.T @ Jm; g += Jm.T @ to_dev(r)
             rs.append(r)
         return torch.cat(rs), to_host64(g), to_host64(A)
@@ -570,8 +590,10 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     hist, why, k = [], "max_iters", -1
     t_start = time.perf_counter()
     for k in range(max_iters):
+        if weight_fn is not None:
+            sw = weight_fn(resid(v).view(nO, nS) * sN, k).reshape(-1).to(F64).sqrt()
         r, g, A = normal_eqs(v)
-        f = 0.5 * float(r @ r)
+        f = 0.5 * float(r @ r) if objective is None else objective(resid(v))
         dg = torch.diagonal(A).clone()
         accepted = False
         for _ in range(30):
@@ -582,7 +604,7 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
             trials = [d]
             if geodesic:
                 Jd = A @ d  # J^T J d
-                Jt_rdd = (2 / geo_h) * ((jtv(v, resid(v + to_dev(geo_h * d))) - g) / geo_h - Jd)
+                Jt_rdd = (2 / geo_h) * ((jtv_w(v, resid_w(v + to_dev(geo_h * d))) - g) / geo_h - Jd)
                 a = -torch.cholesky_solve(Jt_rdd[:, None], L)[:, 0]
                 # use the corrected step only while the quadratic correction is small next to the step;
                 # otherwise (and if it fails to descend) fall back to the plain LM step before raising lam
@@ -590,7 +612,7 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
                     trials = [d + 0.5 * a, d]
             for dd in trials:
                 vn = v + to_dev(dd)
-                fn = 0.5 * float(resid(vn).pow(2).sum())
+                fn = 0.5 * float(resid_w(vn).pow(2).sum()) if objective is None else objective(resid(vn))
                 if math.isfinite(fn) and fn < f:
                     v, f, accepted = vn, fn, True
                     break
