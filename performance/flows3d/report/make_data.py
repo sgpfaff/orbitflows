@@ -194,10 +194,29 @@ def isochrone_pictures(name="s3_isochrone", key="model.pt", n=600):
     return out
 
 
+def sweep():
+    """Invariance-weight sweep on geir (configs/sweep_beta): held-out curves against LM step for each beta."""
+    out = []
+    for name, beta in (("sweep_beta_0", 0.0), ("sweep_beta_0p01", 0.01), ("sweep_beta_0p1", 0.1)):
+        p = os.path.join(RES, name, "log.jsonl")
+        if not os.path.exists(p):
+            continue
+        L = [json.loads(l) for l in open(p) if l.strip()]
+        seen, rows = set(), []
+        for r in L:  # a resumed job logs its restart step twice; keep the first record of each step
+            if r["stage"] in ("init", "lm") and r["it"] not in seen:
+                seen.add(r["it"]); rows.append(r)
+        out.append(dict(name=name, beta=beta, it=[r["it"] for r in rows], h=[r["t"] / 3600 for r in rows],
+                        energy=[r["eval_mean"] for r in rows], energy_max=[r["eval_max"] for r in rows],
+                        wander=[r.get("L_wander_median") for r in rows], wander_max=[r.get("L_wander_max") for r in rows],
+                        inv=[r.get("invariance_rms") for r in rows]))
+    return out
+
+
 def main():
     t0 = time.perf_counter()
     data = dict(generated=time.strftime("%Y-%m-%d %H:%M"), sanity=sanity(), curves=curves(), generalisation=generalisation(),
-                quartic=quartic_portraits(), isochrone=isochrone_pictures())
+                quartic=quartic_portraits(), isochrone=isochrone_pictures(), sweep=sweep())
     p = os.path.join(RES, "exp_invariance.json")
     if os.path.exists(p):
         data["invariance"] = json.load(open(p))

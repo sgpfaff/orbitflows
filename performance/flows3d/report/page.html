@@ -184,8 +184,20 @@ td.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums; white-space
     <div id="inv-block"></div>
   </section>
 
+  <section id="sweep">
+    <div class="eyebrow">5 · Invariance weight sweep</div>
+    <h2>A small invariance weight helps; a large one hurts</h2>
+    <div class="prose"><p>The laptop test used equal weights for 30 steps. This sweep ran on geir, at low priority, from the same trained isochrone model: plain Levenberg–Marquardt with invariance weight β = 0 (the control), 0.01 and 0.1. The invariance residual starts about 8× the energy residual, so β ≈ 1/64 would weigh the two terms equally. The runs were stopped on 19 Oct, once the answer was clear. The weighted runs are much slower per step: they compute the angle tangents and their Jacobian, and geir was heavily loaded. So the curves are compared at equal steps.</p></div>
+    <div class="fig"><h3>Held-out diagnostics against LM step, one curve per weight</h3>
+      <div id="sweep-legend"></div>
+      <div class="grid2" id="fig-sweep"></div>
+      <div class="cap">All four are held-out measures: 64 tori between the training tori, 1,024 independent angles (256 for the invariance residual). The |L| wander is the standard deviation of |x × v| around each torus divided by J_r + L, which neither loss sees directly.</div></div>
+    <div class="fig"><h3>At equal steps, and at the end</h3><div class="tablewrap" id="sweep-table"></div>
+      <div class="cap" id="sweep-cap"></div></div>
+  </section>
+
   <section id="log">
-    <div class="eyebrow">5 · Decisions</div>
+    <div class="eyebrow">6 · Decisions</div>
     <h2>Decision log</h2>
     <div class="log" id="decisions"></div>
   </section>
@@ -229,13 +241,14 @@ function renderAll() {
   const tiles = [
     ['Anisotropic oscillator', '2.6e-16', 'held-out error with linear shears only, by LM step 15: machine precision (the exact map is linear)'],
     ['Separable quartic', fmt(last('s2_sep_quartic')), 'held-out energy error; limited by how densely the training tori cover action space'],
-    ['Isochrone', fmt(last('s3_isochrone')), 'held-out energy error after 200 LM steps, still falling; torus energies within 4×10⁻⁵ of exact'],
+    (() => { const b = (DATA.sweep || []).find(r => r.beta === 0.01); return b ? ['Isochrone', fmt(b.energy[b.energy.length - 1]), `held-out energy error after the β = 0.01 fine-tune (${b.it[b.it.length - 1].toLocaleString()} LM steps); |L| wander ${fmt(b.wander[b.wander.length - 1])}, down from 2.6×10⁻³`]
+      : ['Isochrone', fmt(last('s3_isochrone')), 'held-out energy error after 200 LM steps, still falling; torus energies within 4×10⁻⁵ of exact']; })(),
   ];
   $('#tiles').innerHTML = tiles.map(([k, v, n]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join('');
   $('#summary').innerHTML = `<ul>
     <li><b>The 3D pipeline is exact where it should be.</b> Both toy maps are symplectic to round-off, the ground truth is good to 10⁻¹⁶, and with only linear layers the oscillator target is learned to machine precision.</li>
     <li><b>Nonlinear 3D targets train well but not yet to high precision</b> on laptop budgets (20–25 minutes): about 6×10⁻⁴ for both the separable quartic and the isochrone.</li>
-    <li><b>The main finding so far:</b> the energy-variance loss barely constrains deformations along slow angle combinations. On the isochrone, the learned tori are energy-constant to ${fmt(d3.median(DATA.isochrone.per_torus.energy))} (median), but their angular momentum wanders ${Math.round(d3.median(DATA.isochrone.per_torus.wander) / d3.median(DATA.isochrone.per_torus.energy))}× more, in modes with k·Ω ≈ 0 (section 3). An invariance residual that targets this is being tested (section 4).</li></ul>`;
+    <li><b>The main finding so far:</b> the energy-variance loss barely constrains deformations along slow angle combinations. On the isochrone, the learned tori are energy-constant to ${fmt(d3.median(DATA.isochrone.per_torus.energy))} (median), but their angular momentum wanders ${Math.round(d3.median(DATA.isochrone.per_torus.wander) / d3.median(DATA.isochrone.per_torus.energy))}× more, in modes with k·Ω ≈ 0 (section 3). Training longer on the energy loss alone roughly halves it, and adding a small invariance term (β = 0.01) cuts it by a further ~20% at equal steps, while also lowering the energy error (section 5).</li></ul>`;
 })();
 
 /* ---------- sanity table ---------- */
@@ -338,6 +351,36 @@ chart('fig-wander', el => {
   });
 })();
 
+/* ---------- invariance weight sweep ---------- */
+const SW = DATA.sweep || [];
+const SWC = {0: '--muted', 0.01: '--s7', 0.1: '--s2'};
+const swLab = b => b === 0 ? 'β = 0 (control)' : `β = ${b}`;
+if (SW.length) {
+  $('#sweep-legend').innerHTML = legend(SW.map(r => [tok(SWC[r.beta]), swLab(r.beta)]));
+  chart('fig-sweep', el => {
+    const w = document.createDocumentFragment();
+    [['energy', 'held-out energy error (mean)'], ['energy_max', 'held-out energy error (worst torus)'], ['wander', '|L| wander (median torus)'], ['wander_max', '|L| wander (worst torus)']].forEach(([k, lab]) => {
+      const d = document.createElement('div'); d.className = 'plot'; w.append(d);
+      const rows = SW.flatMap(r => r.it.map((it, i) => ({x: it + 1, v: r[k][i], b: r.beta})).filter(p => p.v > 0));
+      d.append(Plot.plot(base(el, {width: Math.max(260, (el.clientWidth - 12) / (el.clientWidth > 700 ? 2 : 1)), height: 230, marginLeft: 58,
+        x: {type: 'log', label: 'LM step + 1 →', domain: [1, d3.max(rows, r => r.x) * 1.2]}, y: {type: 'log', label: `↑ ${lab}`, domain: logDom(rows.map(r => r.v), 1.15), tickFormat: '.1e'},
+        marks: [Plot.line(rows, {x: 'x', y: 'v', z: 'b', stroke: r => tok(SWC[r.b]), strokeWidth: 2, tip: true, title: r => `${swLab(r.b)}\nLM step ${r.x - 1}: ${fmt(r.v)}`})]})));
+    });
+    return w;
+  });
+  const near = (r, step) => { let j = 0; r.it.forEach((it, i) => { if (Math.abs(it - step) < Math.abs(r.it[j] - step)) j = i; }); return j; };
+  const S0 = Math.min(...SW.filter(r => r.beta > 0).map(r => r.it[r.it.length - 1]));
+  const keys = [['energy', 'Energy error, mean'], ['energy_max', 'Energy error, worst torus'], ['wander', '|L| wander, median torus'], ['wander_max', '|L| wander, worst torus'], ['inv', 'Invariance residual']];
+  const cols = [...SW.map(r => [r, near(r, S0), `${swLab(r.beta)} at step ${r.it[near(r, S0)].toLocaleString()}`]),
+    ...SW.filter(r => r.beta === 0).map(r => [r, r.it.length - 1, `control at its last step, ${r.it[r.it.length - 1].toLocaleString()} (${r.h[r.h.length - 1].toFixed(0)} h)`])];
+  const best = k => Math.min(...cols.slice(0, SW.length).map(([r, i]) => r[k][i]));
+  $('#sweep-table').innerHTML = `<table><thead><tr><th>Held-out</th>${cols.map(c => `<th>${c[2]}</th>`).join('')}</tr></thead><tbody>
+    ${keys.map(([k, l]) => `<tr><td>${l}</td>${cols.map(([r, i], j) => `<td class="num">${j < SW.length && r[k][i] === best(k) ? '<b>' + fmt(r[k][i]) + '</b>' : fmt(r[k][i])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  const c = SW.find(r => r.beta === 0), a = SW.find(r => r.beta === 0.01);
+  if (c && a) { const ic = near(c, S0), ia = near(a, S0); const pct = k => Math.round(100 * (1 - a[k][ia] / c[k][ic]));
+    $('#sweep-cap').innerHTML = `Bold marks the best of the three at equal steps. At ${S0.toLocaleString()} steps, β = 0.01 is below the control on every measure: energy error ${pct('energy')}% lower, worst-torus energy error ${pct('energy_max')}%, median |L| wander ${pct('wander')}%, worst-torus wander ${pct('wander_max')}%, invariance residual ${pct('inv')}%. Its wander is also lower than the control reached after ${c.it[c.it.length - 1].toLocaleString()} steps. β = 0.1 over-weights the invariance term: its energy error falls slowly and its wander ends worse than where it started.`; }
+}
+
 /* ---------- decisions ---------- */
 $('#decisions').innerHTML = [
   ['New 6D layers, not the repo’s conditioners', 'In 3D a shear q ← q + f(p) is symplectic only if f is a gradient. The repo’s conditioners output independent components with per-component gates, which breaks that. The flow here uses SympNet gradient shears with a single gate, plus linear symmetric shears that can represent any linear symplectic map exactly.'],
@@ -347,6 +390,7 @@ $('#decisions').innerHTML = [
   ['Fit the linear part first', 'On the oscillator target, linear shears alone reach 2.6×10⁻¹⁶ in 15 LM steps, while the same fit with unneeded nonlinear layers crawls (2.7×10⁻⁸ after 300 steps) as LM drives their gates to zero. Models should grow: linear first, then nonlinear layers on top.'],
   ['Keep the torus grid', 'Spending the same residual budget on 1,000 scattered tori with 32 angles each reduced overfitting but slowed the fit; at equal steps the 125-torus grid with 256 angles is slightly ahead.'],
   ['Add an invariance residual', 'The energy loss is weak near resonances (section 3). Requiring Hamilton’s equations on the torus constrains those deformations directly and needs no other known integrals, which matters for potentials where only L_z is known.'],
+  ['Weight it small: β ≈ 0.01', 'Equal weights (β = 1, laptop) and β = 0.1 (geir) let the invariance term dominate and make the energy error and the wander worse. At β = 0.01, close to the β ≈ 1/64 that balances the two terms, every held-out measure improves on the control at equal steps (section 5). Next: train with β = 0.01 from the start rather than as a fine-tune, and make the weighted step cheaper.'],
 ].map(([b, s]) => `<div><b>${b}</b><span>${s}</span></div>`).join('');
 
 renderAll();
