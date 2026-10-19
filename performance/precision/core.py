@@ -488,7 +488,7 @@ def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, esca
 
 def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ckpt=None, every=25,
              wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0, escale=None,
-             geodesic=False, geo_h=0.1, geo_alpha=0.75, weight_fn=None, objective=None):
+             geodesic=False, geo_h=0.1, geo_alpha=0.75, weight_fn=None, objective=None, damp_floor=1e-12):
     """Levenberg-Marquardt on r_i / sqrt(N). Per-point Jacobians of the model outputs (vmap of jacrev) on
     the model's device/dtype, chained analytically through H (float64, host) and the per-torus mean;
     J^T J and J^T r are accumulated over chunks of tori (memory O(chunk * P + P^2)) and solved in float64.
@@ -507,7 +507,10 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     balance). The stall test compares objectives across steps, so pass stall_window=None with weights.
     objective(r) -> float: optional objective of the unweighted residual vector r (N,), used to accept steps and
     reported as the loss (default: half the weighted sum of squares). With reweighting, accepting on the true
-    objective (e.g. the L_p norm) keeps it monotone; the weighted step is then only a proposed direction."""
+    objective (e.g. the L_p norm) keeps it monotone; the weighted step is then only a proposed direction.
+    damp_floor: the Marquardt damping is lam * (diag(J^T J) + damp_floor * max diag). Parameters the output barely
+    depends on get almost no damping at the default 1e-12, so trial steps move them enormously; a larger floor
+    (e.g. 1e-6) keeps such steps bounded, which matters for freshly inserted layers."""
     from torch.func import functional_call, jacrev, vmap
     dev, dt = next(model.parameters()).device, next(model.parameters()).dtype
     names = [n for n, _ in model.named_parameters()]
@@ -597,7 +600,7 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
         dg = torch.diagonal(A).clone()
         accepted = False
         for _ in range(30):
-            L, info = torch.linalg.cholesky_ex(A + lam * torch.diag(dg + 1e-12 * dg.max()))
+            L, info = torch.linalg.cholesky_ex(A + lam * torch.diag(dg + damp_floor * dg.max()))
             if int(info) != 0:
                 lam *= 10; continue
             d = -torch.cholesky_solve(g[:, None], L)[:, 0]

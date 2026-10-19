@@ -57,8 +57,9 @@ def main():
     ap.add_argument("--hours", type=float, default=None, help="wall-time cap")
     ap.add_argument("--ckpt-every", type=int, default=50)
     ap.add_argument("--lam0", type=float, default=1e-4)
+    ap.add_argument("--damp-floor", type=float, default=1e-12)
     ap.add_argument("--grow", default=None, help="insert a (q, p) pair of new layers after each of these old layer indices, e.g. 3,7,11")
-    ap.add_argument("--grow-gate", type=float, default=1e-8, help="gate size of the inserted layers (the map changes by ~this)")
+    ap.add_argument("--grow-gate", type=float, default=0.02, help="gate of the inserted layers (their output layer starts at zero)")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--toy-learned", default=None, choices=["lnJ", "amp"],
                     help="switch to a learned toy frequency in this variable, starting at nu0 (same map at the start)")
@@ -90,10 +91,15 @@ def main():
         for k, v in old.items():
             if k.startswith("toy."):
                 gs[k] = v
+        # zero the inserted layers' output weights and bias, so each new shear is exactly zero and the map is unchanged,
+        # but keep an ordinary gate: the output weights then have well-scaled gradients from the first step (with zero
+        # gates instead, the new weights start with no gradient at all and LM's Marquardt scaling mishandles them)
         gen = torch.Generator().manual_seed(a.seed)
         for i in new:
             k = f"flow.layers.{i}.conditioner.gate"
             gs[k] = a.grow_gate * torch.sign(torch.randn(gs[k].shape, generator=gen, dtype=gs[k].dtype))
+            for kk in (f"flow.layers.{i}.conditioner.layers.2.weight", f"flow.layers.{i}.conditioner.layers.2.bias"):
+                gs[kk] = torch.zeros_like(gs[kk])
         g.load_state_dict(gs); m = g
         print(f"grown from {L0} to {mc['n_layers']} layers ({C.n_params(m)} parameters); new layers at {new}", flush=True)
     if a.toy_learned:  # learned omega(J) with all coefficients zero: omega = nu0 and kappa = 0, so the map is unchanged
@@ -125,7 +131,7 @@ def main():
             torch.save(dict(state=C.state_f64(m), it=it, lam=lam), tmp); os.replace(tmp, os.path.join(a.out, "state.pt"))
     n, why, _ = C.train_lm(m, aa, mw, nO, nS, max_iters=a.steps, lam=a.lam0, escale=es, geodesic=True, weight_fn=wfn, objective=obj,
                            record=lambda it, l, lam: record(it + 1, l, lam) if (it + 1 - it0) % a.every == 0 else None, every=1,
-                           ckpt=save, it0=it0, wall_cap=a.hours * 3600 if a.hours else None)
+                           ckpt=save, it0=it0, wall_cap=a.hours * 3600 if a.hours else None, damp_floor=a.damp_floor)
     n += it0
     record(n, float("nan"), float("nan"))
     torch.save(dict(state=C.state_f64(m), it=n), os.path.join(a.out, "state.pt"))
