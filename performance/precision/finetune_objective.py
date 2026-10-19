@@ -57,6 +57,11 @@ def main():
     ap.add_argument("--hours", type=float, default=None, help="wall-time cap")
     ap.add_argument("--ckpt-every", type=int, default=50)
     ap.add_argument("--lam0", type=float, default=1e-4)
+    ap.add_argument("--grow", default=None, help="insert a (q, p) pair of new layers after each of these old layer indices, e.g. 3,7,11")
+    ap.add_argument("--grow-gate", type=float, default=1e-8, help="gate size of the inserted layers (the map changes by ~this)")
+    ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--toy-learned", default=None, choices=["lnJ", "amp"],
+                    help="switch to a learned toy frequency in this variable, starting at nu0 (same map at the start)")
     a = ap.parse_args()
     ck = torch.load(os.path.join(HERE, a.model), weights_only=False)
     mw = C.MWVertical(); w0 = float(ck["omega"])
@@ -71,6 +76,33 @@ def main():
     if a.init:
         sti = torch.load(a.init, weights_only=False); m.load_state_dict(sti["state"]); it0 = int(sti.get("it", 0))
         print(f"continuing from {a.init} (step {it0})", flush=True)
+    if a.grow:  # deepen the model without changing its map: new layer pairs with tiny gates, parity of old layers kept
+        after = sorted(int(x) for x in a.grow.split(",")); L0 = m.flow.num_layers
+        mc = dict(cfg["model"], n_layers=L0 + 2 * len(after)); cfg["model"] = mc; cfg["grown_from"] = dict(layers=L0, after=after)
+        g = C.build_model(mc, cfg["toy"], w0, Jlo, Jhi, a.seed); gs = g.state_dict(); old = m.state_dict(); pos, new = 0, []
+        for j in range(L0):
+            for k, v in old.items():
+                if k.startswith(f"flow.layers.{j}."):
+                    gs[k.replace(f"flow.layers.{j}.", f"flow.layers.{pos}.", 1)] = v
+            pos += 1
+            if j in after:
+                new += [pos, pos + 1]; pos += 2
+        for k, v in old.items():
+            if k.startswith("toy."):
+                gs[k] = v
+        gen = torch.Generator().manual_seed(a.seed)
+        for i in new:
+            k = f"flow.layers.{i}.conditioner.gate"
+            gs[k] = a.grow_gate * torch.sign(torch.randn(gs[k].shape, generator=gen, dtype=gs[k].dtype))
+        g.load_state_dict(gs); m = g
+        print(f"grown from {L0} to {mc['n_layers']} layers ({C.n_params(m)} parameters); new layers at {new}", flush=True)
+    if a.toy_learned:  # learned omega(J) with all coefficients zero: omega = nu0 and kappa = 0, so the map is unchanged
+        cfg["toy"] = dict(mode="learned", omega="nu0", n_cheb=6, var=a.toy_learned)
+        g = C.build_model(cfg["model"], cfg["toy"], w0, Jlo, Jhi, a.seed)
+        missing, unexpected = g.load_state_dict(m.state_dict(), strict=False)
+        assert list(missing) == ["toy.c"] and not unexpected, (missing, unexpected)
+        m = g
+        print(f"learned toy frequency in {a.toy_learned} ({C.n_params(m)} parameters)", flush=True)
     Jt = C.train_grid(MW, Jlo, Jhi, w0); nO, nS = len(Jt), a.angles
     aa = C.aa_points(Jt, C.angles(nS, 0.5)); es = (w0 * Jt).reshape(-1, 1)
     ev = C.Evaluator(cfg, mw, Jlo, Jhi, w0, Jt, nS)
