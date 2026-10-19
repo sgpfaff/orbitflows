@@ -32,6 +32,17 @@ Batches
              32 x 32, and mwgeo's 16 x 64) and ~6.2k parameters (16 x 128, 32 x 64), 2 seeds.
              Read it together with mwteacher: it only measures the model if the students show the optimiser
              is not the limit at these error levels.
+  Second node bundle (after the stall diagnosis: the 32-layer models were limited by 128 angles per orbit in the
+  outer disc; denser angles restart training). All geodesic LM, 68 h.
+  cont32   : the four 32-layer checkpoints of capprobe (32 x 32 and 32 x 64, seeds 0-1) continued at 256 and 512 angles.
+  fresh32  : 32 x 32 from scratch at 256 angles, 3 seeds.
+  depth    : 48 x 32, 64 x 32 and 48 x 64 at 256 angles, 2 seeds: does depth keep paying once data is not the limit?
+  mwt32    : 32 x 32 students on a 32 x 32 MW teacher (the capprobe model fine-tuned at 256 angles), 256 angles.
+  mwt16deep: 32 x 64 students on the 16 x 64 MW teacher, same data as the 16-layer students (128 angles): both
+             depths represent it exactly, so any gain over the 16-layer students is depth easing optimisation.
+  layout   : tori evenly spaced in ln J below 150 pc (24 tori replacing 16; 104 in all) and 256 angles, for the
+             fixed toy and learned omega(J) written in ln J (free) or in amplitude (free; pinned value+slope),
+             at 16 x 64 (1 seed) and 32 x 32 (2 seeds).
   ladder   : (A) SHO with the exact toy: the answer is the identity, which the flow represents exactly;
              (B) SHO with a wrong toy frequency: the answer is a linear rescaling, which tanh shears reach
                  only in a limit (small inner weights, large outer ones);
@@ -132,6 +143,28 @@ def main():
         job(f"lad2_B_geo_s{s}", "ladder2", p, target="sho", omega_target=1.0, toy=dict(mode="fixed", omega=1.5),
             data=LADDER_DATA, seed=s, stages=stages(p, polish_hours=68.0, stall_window=1000, stall_rtol=1e-5, geodesic=True))
         for s in range(3)]
+
+    # ---- second node bundle ----
+    A256 = dict(MW_DATA, n_steps=256)
+    batches["cont32"] = [
+        job(f"c32_L32w{w}s{s}_a{nA}", "cont32", p, model=dict(n_layers=32, width=w), data=dict(MW_DATA, n_steps=nA), seed=s,
+            init={"from": f"capprobe_v2/cap_L32_w{w}_geo_s{s}", "stage": 1}, stages=long_geo())
+        for w in (32, 64) for s in (0, 1) for nA in (256, 512)]
+    batches["fresh32"] = [job(f"f32_s{s}", "fresh32", p, model=dict(n_layers=32, width=32), data=A256, seed=s, stages=long_geo())
+                          for s in range(3)]
+    batches["depth"] = [job(f"dep_L{L}_w{w}_s{s}", "depth", p, model=dict(n_layers=L, width=w), data=A256, seed=s, stages=long_geo())
+                        for L, w in ((48, 32), (64, 32), (48, 64)) for s in range(2)]
+    batches["mwt32"] = [job(f"mwt32_s{s}", "mwt32", p, target="teacher", teacher=dict(checkpoint="teachers/mw_32x32_a256.pt"),
+                            model=dict(n_layers=32, width=32), data=A256, seed=s, stages=long_geo()) for s in range(3)]
+    batches["mwt16deep"] = [job(f"mwt16d_s{s}", "mwt16deep", p, target="teacher", teacher=dict(checkpoint="teachers/mw_fixed_std_s1.pt"),
+                                model=dict(n_layers=32, width=64), seed=s, stages=long_geo()) for s in range(3)]
+    LAY = dict(MW_DATA, n_steps=256, inner=dict(n=24, split_pc=150))
+    TOYS = {"fix": dict(mode="fixed", omega="nu0"), "lrn": dict(mode="learned", omega="nu0", n_cheb=6),
+            "lrnA": dict(mode="learned", omega="nu0", n_cheb=6, var="amp"),
+            "pinA": dict(mode="learned", omega="nu0", n_cheb=6, var="amp", anchor="value_slope")}
+    batches["layout"] = [job(f"lay_{tag}_L{L}w{w}_s{s}", "layout", p, model=dict(n_layers=L, width=w), toy=toy, data=LAY, seed=s,
+                             stages=long_geo())
+                         for tag, toy in TOYS.items() for L, w, seeds in ((16, 64, (0,)), (32, 32, (0, 1))) for s in seeds]
 
     for b, jobs in batches.items():
         path = os.path.join(HERE, "jobs", f"{b}_{p}.jsonl")

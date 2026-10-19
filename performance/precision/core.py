@@ -216,6 +216,22 @@ def j_grid(n, J_lo, J_hi, omega_ref, spacing="asinh", a0=0.03, offset=0.0, dtype
     return omega_ref * finv(u) ** 2 / 2
 
 
+def train_grid(d, J_lo, J_hi, omega_ref):
+    """Training tori from a data config: d["n_orbits"] tori spaced by d["spacing"] (offset 0, both ends included).
+    Optional d["inner"] = {"n": n_in, "split_pc": z}: the tori below toy amplitude a = z (~ z_max near the midplane,
+    natural units with R0 = 8 kpc) are replaced by n_in tori evenly spaced in ln J from J_lo up to that amplitude
+    (the outer tori are unchanged). The held-out grid (Evaluator) always uses the base spacing."""
+    J = j_grid(d["n_orbits"], J_lo, J_hi, omega_ref, d.get("spacing", "asinh"), d.get("a0", 0.03), offset=0.0)
+    inner = d.get("inner")
+    if inner:
+        a_split = inner["split_pc"] / 1000 / RO_KPC
+        J_split = omega_ref * a_split ** 2 / 2
+        outer = J[J >= J_split]
+        lnJ = math.log(J_lo) + (math.log(J_split) - math.log(J_lo)) * torch.arange(inner["n"], dtype=J.dtype) / inner["n"]
+        J = torch.cat([lnJ.exp(), outer])
+    return J
+
+
 def angles(n, offset=0.5, dtype=F64):
     return 2 * math.pi * (torch.arange(n, dtype=dtype) + offset) / n
 
@@ -238,11 +254,16 @@ class ToyMap(torch.nn.Module):
                     continuation below J_lo this gives omega = nu0 for every smaller action
     """
 
-    def __init__(self, omega0, learned=False, J_lo=1e-6, J_hi=1.0, n_cheb=6, anchor=None):
+    def __init__(self, omega0, learned=False, J_lo=1e-6, J_hi=1.0, n_cheb=6, anchor=None, var="lnJ"):
         super().__init__()
         self.register_buffer("ln_w0", torch.tensor(math.log(omega0), dtype=torch.float64))
         self.learned = learned
         self.lnJ_lo, self.lnJ_hi = math.log(J_lo), math.log(J_hi)
+        # the series variable: ln J (resolution spread evenly over the decades of J) or the amplitude sqrt(J)
+        # (resolution where the orbits are large; the region near the midplane is a sliver of the range)
+        assert var in ("lnJ", "amp"), var
+        self.var = var
+        self.x_lo, self.x_hi = (self.lnJ_lo, self.lnJ_hi) if var == "lnJ" else (math.sqrt(J_lo), math.sqrt(J_hi))
         assert anchor in (None, "value", "value_slope"), anchor
         self.anchor = anchor
         self.k0 = {None: 0, "value": 1, "value_slope": 2}[anchor]  # pinned modes carry no parameter
@@ -268,12 +289,14 @@ class ToyMap(torch.nn.Module):
     def ln_omega_kappa(self, J):
         if not self.learned:
             return self.ln_w0.expand_as(J), torch.zeros_like(J)
-        scale = 2.0 / (self.lnJ_hi - self.lnJ_lo)
-        s = scale * (torch.log(J) - self.lnJ_lo) - 1
-        sc = s.clamp(-1.0, 1.0)  # beyond the trained range: continue linearly in ln J (C1, constant kappa)
+        scale = 2.0 / (self.x_hi - self.x_lo)
+        x = torch.log(J) if self.var == "lnJ" else torch.sqrt(J)
+        s = scale * (x - self.x_lo) - 1
+        sc = s.clamp(-1.0, 1.0)  # beyond the trained range: continue linearly in the series variable (C1)
         val, der = self._series(sc)
-        kappa = der * scale
-        return self.ln_w0 + val + kappa * (s - sc) / scale, kappa
+        dx_dlnJ = 1.0 if self.var == "lnJ" else 0.5 * x  # kappa = d ln omega / d ln J = (d/ds)(ds/dx)(dx/d ln J)
+        kappa = der * scale * dx_dlnJ
+        return self.ln_w0 + val + der * (s - sc), kappa
 
     def forward(self, aa):
         th, J = aa[..., 0], aa[..., 1]
@@ -327,7 +350,7 @@ def build_model(mcfg, toy_cfg, omega0, J_lo, J_hi, seed, dtype=F64, device=HOST)
             if n.endswith("gate"):
                 p.copy_(gs * torch.randn(p.shape, generator=g))
     toy = ToyMap(omega0, toy_cfg.get("mode", "fixed") == "learned", J_lo, J_hi, toy_cfg.get("n_cheb", 6),
-                 toy_cfg.get("anchor"))
+                 toy_cfg.get("anchor"), toy_cfg.get("var", "lnJ"))
     return AAMap(toy, flow).to(dtype).to(device)
 
 

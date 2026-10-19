@@ -60,7 +60,7 @@ def main(spec, out_root):
         J_lo, J_hi = d["J_lo"], d["J_hi"]
     tw = cfg["toy"].get("omega", "nu0")
     omega0 = target.nu0 if tw == "nu0" else float(tw)
-    J_train = C.j_grid(d["n_orbits"], J_lo, J_hi, omega0, d.get("spacing", "asinh"), d.get("a0", 0.03), offset=0.0)
+    J_train = C.train_grid(d, J_lo, J_hi, omega0)
     aa_train = C.aa_points(J_train, C.angles(d["n_steps"], 0.5))
     nO, nS = aa_train.shape[:2]
     escale = (omega0 * J_train).reshape(-1, 1) if cfg.get("loss_norm", "toy") == "toy" else None
@@ -76,6 +76,11 @@ def main(spec, out_root):
         model.load_state_dict(st["state"])
         print(f"resuming {cfg['name']} at stage {st['stage']} it {st['it']} (wall so far {st['t_total']/3600:.2f} h)")
     stage0, it_done, lam = (st["stage"], st["it"], st.get("lam")) if st else (0, 0, None)
+    if st is None and cfg.get("init"):  # start from another job's checkpoint (e.g. continue on denser data)
+        src = cfg["init"]["from"]; src = src if os.path.isabs(src) else os.path.join(out_root, src)
+        model.load_state_dict(torch.load(os.path.join(src, "state.pt"), weights_only=False)["state"])
+        stage0 = cfg["init"].get("stage", 0)
+        print(f"initialised {cfg['name']} from {src}, starting at stage {stage0}")
     t_off = st["t_total"] if st else 0.0
     stage_t0 = st.get("stage_t", 0.0) if st else 0.0  # wall time already spent in the stage being resumed
     stage_info = st.get("stage_info", []) if st else []

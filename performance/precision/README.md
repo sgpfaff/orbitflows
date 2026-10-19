@@ -76,6 +76,17 @@ results/<batch>/<name>/config.json   the job spec
 
 To stop, press Ctrl-C (or kill it, or let the allocation end). To resume, run the same command: finished jobs are skipped and the others continue from their last checkpoint, losing at most 25 LM steps.
 
+### Second bundle: denser angles, depth, a 32-layer teacher, a new layout
+
+A stall diagnosis of the first bundle's 32-layer models showed that their held-out error was set by the angular sampling of the outer orbits (error between the 128 training angles 50× the error at them above 3 kpc), and fine-tuning with 256 angles per orbit restarted training (4.9 → 2.2×10⁻⁷ held-out in 200 steps). The second bundle (`trillium_bundle2.sh`, 35 jobs, all geodesic LM) builds on that:
+
+- `cont32`: the four 32-layer checkpoints continued at 256 and 512 angles (`init` starts a job from another job's `state.pt`, at a given stage).
+- `fresh32`: 32 × 32 from scratch at 256 angles.
+- `depth`: 48 × 32, 64 × 32, 48 × 64 at 256 angles.
+- `mwt32`: students on a 32 × 32 MW teacher (`teachers/mw_32x32_a256.pt`, the fine-tuned model; 2.2×10⁻⁷ from the real MW).
+- `mwt16deep`: 32 × 64 students on the 16 × 64 teacher with the 16-layer students' data, isolating the effect of depth on optimisation.
+- `layout`: `data.inner = {n: 24, split_pc: 150}` replaces the tori below 150 pc (toy amplitude) with 24 evenly spaced in ln J (104 tori in all; the held-out grid is unchanged), with 256 angles, for the fixed toy and for learned ω(J) written in ln J or, with `toy.var = "amp"`, in amplitude √J (free, or pinned value + slope).
+
 ## A whole Trillium node
 
 Trillium schedules only whole nodes (192 cores, at most 24 h per job). One LM step barely speeds up with more threads (1.8 s on 1 thread, 1.2 s on 4), so a node is best used by many 4-thread jobs. `trillium_node.sh` runs the current bundle, 45 jobs, in priority order:
