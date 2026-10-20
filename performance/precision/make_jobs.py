@@ -43,6 +43,14 @@ Batches
   layout   : tori evenly spaced in ln J below 150 pc (24 tori replacing 16; 104 in all) and 256 angles, for the
              fixed toy and learned omega(J) written in ln J (free) or in amplitude (free; pinned value+slope),
              at 16 x 64 (1 seed) and 32 x 32 (2 seeds).
+  Third node bundle (the second found: depth keeps paying, 48 x 32 from scratch reached 3.2e-8; the learned
+  frequency written in amplitude is the best toy, 1.5-4x below fixed nu0 at 32 layers). All geodesic LM, 68 h caps.
+  deep3    : 48 x 32 and 64 x 32 with the learned frequency (amplitude series) on the ln J layout, 256 and 512 angles.
+  ctrl3    : controls: 48 x 32 fixed nu0 at 512 angles (angles at 48 layers); the learned frequency on the standard
+             layout at 32, 48 and 64 layers (separates the toy from the layout).
+  resume3  : the best second-bundle jobs, resumed from their checkpoints (same names, so they continue with their saved
+             damping and the remaining LM time): 48 x 32 and 64 x 32 (depth), the 32 x 32 layout runs with fixed and
+             learned frequency, and the 32 x 32 continuations at 512 angles.
   ladder   : (A) SHO with the exact toy: the answer is the identity, which the flow represents exactly;
              (B) SHO with a wrong toy frequency: the answer is a linear rescaling, which tanh shears reach
                  only in a limit (small inner weights, large outer ones);
@@ -165,6 +173,22 @@ def main():
     batches["layout"] = [job(f"lay_{tag}_L{L}w{w}_s{s}", "layout", p, model=dict(n_layers=L, width=w), toy=toy, data=LAY, seed=s,
                              stages=long_geo())
                          for tag, toy in TOYS.items() for L, w, seeds in ((16, 64, (0,)), (32, 32, (0, 1))) for s in seeds]
+
+    # ---- third node bundle ----
+    LRNA = TOYS["lrnA"]
+    batches["deep3"] = [
+        job(f"d3_L{L}w32_lrnA_a{nA}_s{s}", "deep3", p, model=dict(n_layers=L, width=32), toy=LRNA,
+            data=dict(LAY, n_steps=nA), seed=s, stages=long_geo())
+        for L, seeds in ((48, (0, 1, 2)), (64, (0, 1))) for nA in (256, 512) for s in seeds]
+    batches["ctrl3"] = (
+        [job(f"c3_L48w32_fix_a512_s{s}", "ctrl3", p, model=dict(n_layers=48, width=32), data=dict(MW_DATA, n_steps=512),
+             seed=s, stages=long_geo()) for s in range(2)]
+        + [job(f"c3_L{L}w32_lrnA_std_a256_s{s}", "ctrl3", p, model=dict(n_layers=L, width=32), toy=LRNA, data=A256,
+               seed=s, stages=long_geo()) for L in (32, 48, 64) for s in range(2)])
+    keep = lambda j: (j["name"] in ("dep_L48_w32_s0", "dep_L48_w32_s1", "dep_L64_w32_s0", "dep_L64_w32_s1",
+                                    "lay_lrnA_L32w32_s0", "lay_lrnA_L32w32_s1", "lay_fix_L32w32_s0", "lay_fix_L32w32_s1",
+                                    "c32_L32w32s0_a512", "c32_L32w32s1_a512"))
+    batches["resume3"] = [j for b in ("depth", "layout", "cont32") for j in batches[b] if keep(j)]
 
     for b, jobs in batches.items():
         path = os.path.join(HERE, "jobs", f"{b}_{p}.jsonl")
