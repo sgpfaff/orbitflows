@@ -488,7 +488,8 @@ def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, esca
 
 def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ckpt=None, every=25,
              wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0, escale=None,
-             geodesic=False, geo_h=0.1, geo_alpha=0.75, weight_fn=None, objective=None, damp_floor=1e-12):
+             geodesic=False, geo_h=0.1, geo_alpha=0.75, weight_fn=None, objective=None, damp_floor=1e-12,
+             retry_lam=None):
     """Levenberg-Marquardt on r_i / sqrt(N). Per-point Jacobians of the model outputs (vmap of jacrev) on
     the model's device/dtype, chained analytically through H (float64, host) and the per-torus mean;
     J^T J and J^T r are accumulated over chunks of tori (memory O(chunk * P + P^2)) and solved in float64.
@@ -510,7 +511,12 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     objective (e.g. the L_p norm) keeps it monotone; the weighted step is then only a proposed direction.
     damp_floor: the Marquardt damping is lam * (diag(J^T J) + damp_floor * max diag). Parameters the output barely
     depends on get almost no damping at the default 1e-12, so trial steps move them enormously; a larger floor
-    (e.g. 1e-6) keeps such steps bounded, which matters for freshly inserted layers."""
+    (e.g. 1e-6) keeps such steps bounded, which matters for freshly inserted layers.
+    retry_lam: when an iteration finds no descent step (30 trials, lam raised 4x after each), or the stall rule fires
+    while lam is high, restart the damping sweep once from retry_lam before stopping. Near a stall lam can drift
+    far above its usual value; trial steps then barely change the loss, every trial is rejected, and the run stops
+    although a step from the usual lam (~1e-11 on MW) still descends. Without it (None), one failed iteration ends
+    the run, as before."""
     from torch.func import functional_call, jacrev, vmap
     dev, dt = next(model.parameters()).device, next(model.parameters()).dtype
     names = [n for n, _ in model.named_parameters()]
@@ -591,6 +597,7 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
 
     v = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
     hist, why, k = [], "max_iters", -1
+    n_retry = 0
     t_start = time.perf_counter()
     for k in range(max_iters):
         if weight_fn is not None:
@@ -599,7 +606,13 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
         f = 0.5 * float(r @ r) if objective is None else objective(resid(v))
         dg = torch.diagonal(A).clone()
         accepted = False
-        for _ in range(30):
+        lam_start = lam
+        for trial in range(60 if retry_lam else 30):
+            if trial == 30:  # a second sweep from retry_lam, unless the first one already started there
+                if lam_start <= 4 * retry_lam:
+                    break
+                print(f"  LM it {it0 + k}: no descent step from lam {lam_start:.1e}; retrying from {retry_lam:.1e}", flush=True)
+                lam = retry_lam; n_retry += 1
             L, info = torch.linalg.cholesky_ex(A + lam * torch.diag(dg + damp_floor * dg.max()))
             if int(info) != 0:
                 lam *= 10; continue
@@ -630,6 +643,9 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
         hist.append(f)
         stalled = bool(stall_window and len(hist) > stall_window
                        and (hist[-stall_window - 1] - f) / hist[-stall_window - 1] < stall_rtol)
+        if stalled and retry_lam and lam > 1e3 * retry_lam:  # stalled at high damping: reset it, restart the stall window
+            print(f"  LM it {it0 + k}: stalled at lam {lam:.1e}; resetting lam to {retry_lam:.1e}", flush=True)
+            lam, hist, stalled = retry_lam, [f], False; n_retry += 1
         out_of_time = bool(wall_cap and time.perf_counter() - t_start > wall_cap)
         stop = (not accepted) or stalled or out_of_time
         if record and (k % every == 0 or stop):

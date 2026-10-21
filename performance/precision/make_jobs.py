@@ -51,6 +51,12 @@ Batches
   resume3  : the best second-bundle jobs, resumed from their checkpoints (same names, so they continue with their saved
              damping and the remaining LM time): 48 x 32 and 64 x 32 (depth), the 32 x 32 layout runs with fixed and
              learned frequency, and the 32 x 32 continuations at 512 angles.
+  Fourth bundle (the third: most runs stopped on one failed LM iteration while still improving, and a restart
+  from the usual damping continues them).
+  cont4    : every third-bundle job continued from its final checkpoint (same names, results in cont4_v2/), LM from
+             lam 1e-11 with retry_lam 1e-11: an iteration that finds no descent step restarts its damping sweep
+             from 1e-11 before the run stops. Jobs that a restart from 1e-11 could not move, or moved by < 5e-5 per
+             step, are left out (jobs/cont4_skip.json): 13 jobs.
   ladder   : (A) SHO with the exact toy: the answer is the identity, which the flow represents exactly;
              (B) SHO with a wrong toy frequency: the answer is a linear rescaling, which tanh shears reach
                  only in a limit (small inner weights, large outer ones);
@@ -189,6 +195,18 @@ def main():
                                     "lay_lrnA_L32w32_s0", "lay_lrnA_L32w32_s1", "lay_fix_L32w32_s0", "lay_fix_L32w32_s1",
                                     "c32_L32w32s0_a512", "c32_L32w32s1_a512"))
     batches["resume3"] = [j for b in ("depth", "layout", "cont32") for j in batches[b] if keep(j)]
+
+    # ---- fourth bundle: continue the third bundle's jobs, with the damping reset on a failed iteration ----
+    # left out (laptop probe, 2026-10-21: two LM iterations from lam 1e-11 on each final checkpoint): "dead" found no
+    # descent step, or only at lam > 1e2; "slow" lowered the loss by < 5e-5 per step, < 10% over a node-day
+    SKIP = json.load(open(os.path.join(HERE, "jobs", "cont4_skip.json")))
+    DEAD = set(SKIP["dead"]) | set(SKIP["slow"])
+
+    def cont(j):
+        lm = dict(j["stages"][-1], lam0=1e-11, retry_lam=1e-11)
+        src = f"{j['batch']}/{j['name']}"
+        return dict(j, batch="cont4_v2", init={"from": src, "stage": len(j["stages"]) - 1}, stages=j["stages"][:-1] + [lm])
+    batches["cont4"] = [cont(j) for b in ("deep3", "ctrl3", "resume3") for j in batches[b] if j["name"] not in DEAD]
 
     for b, jobs in batches.items():
         path = os.path.join(HERE, "jobs", f"{b}_{p}.jsonl")

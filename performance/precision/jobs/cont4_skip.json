@@ -1,0 +1,21 @@
+{
+ "dead": [
+  "d3_L48w32_lrnA_a256_s0",
+  "d3_L48w32_lrnA_a256_s2",
+  "d3_L48w32_lrnA_a512_s1",
+  "d3_L64w32_lrnA_a512_s1",
+  "d3_L64w32_lrnA_a256_s0",
+  "dep_L48_w32_s1",
+  "lay_fix_L32w32_s0",
+  "c32_L32w32s0_a512"
+ ],
+ "slow": [
+  "c32_L32w32s1_a512",
+  "c3_L32w32_lrnA_std_a256_s1",
+  "c3_L48w32_fix_a512_s0",
+  "dep_L48_w32_s0",
+  "lay_fix_L32w32_s1",
+  "lay_lrnA_L32w32_s0",
+  "lay_lrnA_L32w32_s1"
+ ]
+}
