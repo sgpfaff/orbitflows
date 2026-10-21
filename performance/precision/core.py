@@ -544,7 +544,8 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     def jtv(v, u):
         """J^T u for the residual Jacobian at v (one backward pass)."""
         vv = v.detach().clone().requires_grad_(True)
-        y = to_host64(functional_call(model, unflat(vv), (aa_dev.reshape(-1, 2),)))
+        y = functional_call(model, unflat(vv), (aa_dev.reshape(-1, 2),))
+        y = y.cpu().double() if (y.dtype != F64 or y.device != HOST) else y  # keep the graph (to_host64 detaches)
         H = target.H(y).view(nO, nS)
         m = H.mean(1, keepdim=True)
         r = ((H - m) / (escale if escale is not None else m.abs()) / sN).reshape(-1)
