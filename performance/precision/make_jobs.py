@@ -57,6 +57,7 @@ Batches
              lam 1e-11 with retry_lam 1e-11: an iteration that finds no descent step restarts its damping sweep
              from 1e-11 before the run stops. Jobs that a restart from 1e-11 could not move, or moved by < 5e-5 per
              step, are left out (jobs/cont4_skip.json): 13 jobs.
+  cont4g   : the same 13 jobs on one H100 each (Trillium GPU cluster), LM in float64 on CUDA; results in cont4g_v2/.
   ladder   : (A) SHO with the exact toy: the answer is the identity, which the flow represents exactly;
              (B) SHO with a wrong toy frequency: the answer is a linear rescaling, which tanh shears reach
                  only in a limit (small inner weights, large outer ones);
@@ -207,6 +208,10 @@ def main():
         src = f"{j['batch']}/{j['name']}"
         return dict(j, batch="cont4_v2", init={"from": src, "stage": len(j["stages"]) - 1}, stages=j["stages"][:-1] + [lm])
     batches["cont4"] = [cont(j) for b in ("deep3", "ctrl3", "resume3") for j in batches[b] if j["name"] not in DEAD]
+    # the same 13 continuations on the Trillium GPU cluster (trillium_gpu_cont4.sh: one H100 per job, a Slurm array):
+    # LM in float64 on CUDA with 96 tori per Jacobian chunk (benchmark: 4-10x faster per job than 6 CPU threads)
+    batches["cont4g"] = [dict(j, batch="cont4g_v2", stages=j["stages"][:-1] + [dict(j["stages"][-1], device="cuda", chunk_orbits=96)])
+                         for j in batches["cont4"]]
 
     for b, jobs in batches.items():
         path = os.path.join(HERE, "jobs", f"{b}_{p}.jsonl")
