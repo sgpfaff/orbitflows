@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=orbitflows-g4
-#SBATCH --account=def-bovy
+#SBATCH --account=ctb-ripperda
 #SBATCH -p compute
 #SBATCH --array=0-12
 #SBATCH --gpus-per-node=1
