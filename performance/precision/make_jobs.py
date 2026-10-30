@@ -59,6 +59,8 @@ Batches
              step, are left out (jobs/cont4_skip.json): 13 jobs.
   fourier1 : 16 x 64 students of the 16-layer MW teacher with Fourier-term conditioners (12 frequencies, 1-100), from
              scratch on H100s, seeds 0-1 (paired with the first bundle's mwt_geo_s0/s1: same initial network).
+  fourier2 : the same with amplitude-modulated Fourier terms (A_j(x) = a_j + sum_k C_jk tanh(U_k x + V_k), 8 shared
+             tanh units per layer), seed 0.
   cont4g   : the same 13 jobs on one H100 each (Trillium GPU cluster), LM in float64 on CUDA; results in cont4g_v2/.
   ladder   : (A) SHO with the exact toy: the answer is the identity, which the flow represents exactly;
              (B) SHO with a wrong toy frequency: the answer is a linear rescaling, which tanh shears reach
@@ -223,6 +225,9 @@ def main():
                        stall_rtol=1e-5, every=25, geodesic=True, retry_lam=1e-11, chunk_orbits=96)]
     batches["fourier1"] = [job(f"mwt_ff12_s{s}", "fourier1", p, target="teacher", teacher=dict(checkpoint="teachers/mw_fixed_std_s1.pt"),
                                model=dict(fourier=dict(n=12, max=100.0)), seed=s, stages=gpu_stages) for s in (0, 1)]
+    # the same with amplitude-modulated Fourier terms (8 shared tanh units per layer), seed 0 (paired with mwt_geo_s0)
+    batches["fourier2"] = [job(f"mwt_ffm12_s{s}", "fourier2", p, target="teacher", teacher=dict(checkpoint="teachers/mw_fixed_std_s1.pt"),
+                               model=dict(fourier=dict(n=12, max=100.0, modulate=8)), seed=s, stages=gpu_stages) for s in (0,)]
 
     for b, jobs in batches.items():
         path = os.path.join(HERE, "jobs", f"{b}_{p}.jsonl")

@@ -324,17 +324,30 @@ class FourierNNConditioner(SimpleNNConditioner):
     angular harmonics up to n ~ w A, which plain tanh layers reach only through directions 1e-9..1e-15 as sensitive as
     the strongest (spectral_bias_diag.py)."""
 
-    def __init__(self, n_freq=12, w_max=100.0, **kw):
+    def __init__(self, n_freq=12, w_max=100.0, modulate=0, **kw):
         super().__init__(**kw)
         self.register_buffer("freqs", torch.logspace(0, math.log10(w_max), n_freq, dtype=torch.float64))
         self.fa = torch.nn.Parameter(torch.zeros(n_freq)); self.fb = torch.nn.Parameter(torch.zeros(n_freq))
+        self.modulate = modulate
+        if modulate:
+            # amplitude modulation: A_j(x) = a_j + sum_k C_jk tanh(U_k x + V_k), B_j likewise, with K = modulate shared tanh
+            # units. On a torus of amplitude A the input spans [-A, A], so the amplitudes can switch harmonics on for the
+            # outer tori only. C, D start at zero; U, V are fixed spreads (no random draws, so the plain part of the
+            # network is initialised exactly as without the Fourier terms).
+            self.mU = torch.nn.Parameter(torch.linspace(0.5, 3.0, modulate))
+            self.mV = torch.nn.Parameter(torch.linspace(-2.0, 2.0, modulate))
+            self.mC = torch.nn.Parameter(torch.zeros(modulate, n_freq)); self.mD = torch.nn.Parameter(torch.zeros(modulate, n_freq))
 
     def forward(self, inputs):
         x = inputs
         for layer in self.layers:
             x = layer(x)
         ph = inputs * self.freqs.to(inputs.dtype)
-        x = x + (torch.sin(ph) * self.fa + torch.cos(ph) * self.fb).sum(-1, keepdim=True)
+        A, B = self.fa, self.fb
+        if self.modulate:
+            h = torch.tanh(inputs * self.mU + self.mV)              # (..., K)
+            A = A + h @ self.mC; B = B + h @ self.mD                 # (..., F)
+        x = x + (torch.sin(ph) * A + torch.cos(ph) * B).sum(-1, keepdim=True)
         return x * self.gate
 
 
@@ -361,7 +374,8 @@ def build_model(mcfg, toy_cfg, omega0, J_lo, J_hi, seed, dtype=F64, device=HOST)
                  include_bias=True)
     if mcfg.get("fourier"):  # {"n": number of frequencies, "max": highest frequency}: FourierNNConditioner
         cond = FourierNNConditioner
-        cargs.update(n_freq=mcfg["fourier"].get("n", 12), w_max=mcfg["fourier"].get("max", 100.0))
+        cargs.update(n_freq=mcfg["fourier"].get("n", 12), w_max=mcfg["fourier"].get("max", 100.0),
+                     modulate=mcfg["fourier"].get("modulate", 0))
     flow = Flow(2, mcfg["n_layers"], SymplecticCouplingLayer, cond, cargs)
     g = torch.Generator().manual_seed(1000 + seed)
     with torch.no_grad():
