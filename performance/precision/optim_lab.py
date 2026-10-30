@@ -8,7 +8,9 @@ bed for changes to the optimiser.
     python optim_lab.py homotopy STUDENT_JOB_DIR [--stages 20] [--stage-iters 150] [--final-iters 3000] [--seed 0]
 
 damping: from the stalled student's checkpoint, the same number of LM iterations (geodesic, retry_lam 1e-11) with each
-  damping matrix (core.train_lm damping=; floor6 is Marquardt with damp_floor 1e-6). Escaping the stall shows as a
+  damping matrix (core.train_lm damping=; floor6 is Marquardt with damp_floor 1e-6), or with the residual's angular
+  harmonics weighted by n^k (core.train_lm harmonic_weight=K): harmK accepts steps only if they lower the true loss,
+  harmKw on the weighted loss. Escaping the stall shows as a
   drop in the held-out error against the teacher.
 homotopy: a fresh student (same architecture and seed rule), no Adam, trained by LM along the family of targets
   H_s = (1 - s) H_SHO + s H_teacher, s = 0 .. 1 in equal stages, each stage started from the previous one's solution
@@ -18,6 +20,7 @@ homotopy: a fresh student (same architecture and seed rule), no Adam, trained by
 Writes OUT (default optim_lab_<mode>.json next to this file).
 """
 import argparse
+import copy
 import json
 import os
 import sys
@@ -62,7 +65,7 @@ def setup(jd, device="cpu"):
         def cpu(m):
             if next(m.parameters()).device.type == "cpu":
                 return m
-            mc = build(0, "cpu"); mc.load_state_dict(C.state_f64(m)); return mc
+            return copy.deepcopy(m).to("cpu")  # any architecture
 
         @staticmethod
         def quick(m):
@@ -73,23 +76,37 @@ def setup(jd, device="cpu"):
             """Held-out mean of |H - <H>| / |<H>| against any target (e.g. a homotopy stage)."""
             with torch.no_grad():
                 return float(C.residual_host(Ev.cpu(m), ev0.aa, target, *ev0.aa.shape[:2]).abs().mean())
+    Ev.J_range = (J_lo, J_hi)
     return cfg, t, aa, nO, nS, es, Ev, build
 
 
 def damping(a):
     cfg, t, aa, nO, nS, es, ev, build = setup(a.job, a.device)
+    J_range = ev.J_range
     st = torch.load(os.path.join(a.job, "state.pt"), weights_only=False)
     rows = []
     for v in a.variants.split(","):
-        m = build(cfg.get("seed", 0)); m.load_state_dict({k: v.to(a.device) for k, v in st["state"].items()})
-        mode, floor = ("marquardt", 1e-6) if v == "floor6" else (v, 1e-12)
+        if v.startswith("fourier"):  # fourierN_W: add Fourier terms (N frequencies up to W, zero, so the map is unchanged)
+            nf, wm = v[7:].split("_")
+            mc = dict(cfg["model"], fourier=dict(n=int(nf), max=float(wm)))
+            m = C.build_model(mc, cfg["toy"], t.nu0, *J_range, cfg.get("seed", 0), C.F64, a.device)
+            missing, unexpected = m.load_state_dict({k: v_.to(a.device) for k, v_ in st["state"].items()}, strict=False)
+            assert not unexpected and all(k.endswith((".fa", ".fb", ".freqs")) for k in missing), (missing, unexpected)
+        else:
+            m = build(cfg.get("seed", 0)); m.load_state_dict({k: v_.to(a.device) for k, v_ in st["state"].items()})
+        mode, floor, hk = ("marquardt", 1e-6, None) if v == "floor6" else \
+            (("marquardt", 1e-12, float(v[4:].rstrip("w"))) if v.startswith("harm") else
+             ("marquardt", 1e-12, None) if v.startswith("fourier") else (v, 1e-12, None))
+        # harmK: the weighted loss sets the step, but a step is accepted only if it lowers the true loss; harmKw: accepted on the weighted loss
+        obj = (lambda r: 0.5 * float(r @ r)) if (hk is not None and not v.endswith("w")) else None
         e0 = ev.quick(m); curve = [(0, e0["eval_mean"], e0["train_mean"], float("nan"))]; t0 = time.perf_counter()
 
         def rec(it, loss, lam):
             if it % 25 == 0:
                 q = ev.quick(m); curve.append((it, q["eval_mean"], q["train_mean"], lam))
         n, why, lam = C.train_lm(m, aa, t, nO, nS, max_iters=a.iters, lam=a.lam0, record=rec, every=1, escale=es, geodesic=True,
-                                 retry_lam=1e-11, damping=mode, damp_floor=floor, chunk_orbits=a.chunk)
+                                 retry_lam=1e-11, damping=mode, damp_floor=floor, chunk_orbits=a.chunk, harmonic_weight=hk,
+                                 objective=obj)
         q = ev.quick(m); curve.append((n, q["eval_mean"], q["train_mean"], lam))
         rows.append(dict(variant=v, iters=n, why=why, s=time.perf_counter() - t0, start=e0["eval_mean"], end=q["eval_mean"],
                          end_max=q["eval_max"], train_end=q["train_mean"], curve=curve))

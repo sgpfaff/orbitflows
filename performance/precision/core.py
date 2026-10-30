@@ -316,6 +316,28 @@ class ToyMap(torch.nn.Module):
         return 1 - kappa[:, None] * torch.cos(2 * th)[None, :]
 
 
+class FourierNNConditioner(SimpleNNConditioner):
+    """The repo conditioner plus a Fourier term: f(x) = gate * (MLP(x) + sum_j a_j sin(w_j x) + b_j cos(w_j x)), with
+    n_freq fixed frequencies w_j log-spaced from 1 to w_max and a, b starting at zero, so a layer starts as the plain one
+    and the class contains the plain one. Still a shear: exactly symplectic, with the same closed-form inverse.
+    Aimed at the spectral bias of tanh MLPs: on a torus of amplitude A a sinusoid sin(w x) of the shear's input carries
+    angular harmonics up to n ~ w A, which plain tanh layers reach only through directions 1e-9..1e-15 as sensitive as
+    the strongest (spectral_bias_diag.py)."""
+
+    def __init__(self, n_freq=12, w_max=100.0, **kw):
+        super().__init__(**kw)
+        self.register_buffer("freqs", torch.logspace(0, math.log10(w_max), n_freq, dtype=torch.float64))
+        self.fa = torch.nn.Parameter(torch.zeros(n_freq)); self.fb = torch.nn.Parameter(torch.zeros(n_freq))
+
+    def forward(self, inputs):
+        x = inputs
+        for layer in self.layers:
+            x = layer(x)
+        ph = inputs * self.freqs.to(inputs.dtype)
+        x = x + (torch.sin(ph) * self.fa + torch.cos(ph) * self.fb).sum(-1, keepdim=True)
+        return x * self.gate
+
+
 class OddNNConditioner(SimpleNNConditioner):
     """Odd part of the repo conditioner: f(-x) = -f(x), so every shear fixes the origin."""
 
@@ -335,9 +357,12 @@ class AAMap(torch.nn.Module):
 def build_model(mcfg, toy_cfg, omega0, J_lo, J_hi, seed, dtype=F64, device=HOST):
     torch.manual_seed(seed)
     cond = OddNNConditioner if mcfg.get("odd", False) else SimpleNNConditioner
-    flow = Flow(2, mcfg["n_layers"], SymplecticCouplingLayer, cond,
-                dict(num_layers=mcfg.get("depth", 2), projection_dims=mcfg["width"],
-                     activation=ACTS[mcfg.get("act", "tanh")], include_bias=True))
+    cargs = dict(num_layers=mcfg.get("depth", 2), projection_dims=mcfg["width"], activation=ACTS[mcfg.get("act", "tanh")],
+                 include_bias=True)
+    if mcfg.get("fourier"):  # {"n": number of frequencies, "max": highest frequency}: FourierNNConditioner
+        cond = FourierNNConditioner
+        cargs.update(n_freq=mcfg["fourier"].get("n", 12), w_max=mcfg["fourier"].get("max", 100.0))
+    flow = Flow(2, mcfg["n_layers"], SymplecticCouplingLayer, cond, cargs)
     g = torch.Generator().manual_seed(1000 + seed)
     with torch.no_grad():
         if mcfg.get("bias_init", "torch") == "torch":  # PyTorch default U(-1/sqrt(fan_in), 1/sqrt(fan_in))
@@ -489,7 +514,7 @@ def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, esca
 def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ckpt=None, every=25,
              wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0, escale=None,
              geodesic=False, geo_h=0.1, geo_alpha=0.75, weight_fn=None, objective=None, damp_floor=1e-12,
-             retry_lam=None, damping="marquardt"):
+             retry_lam=None, damping="marquardt", harmonic_weight=None):
     """Levenberg-Marquardt on r_i / sqrt(N). Per-point Jacobians of the model outputs (vmap of jacrev) on
     the model's device/dtype, chained analytically through H (float64, host) and the per-torus mean;
     J^T J and J^T r are accumulated over chunks of tori (memory O(chunk * P + P^2)) and solved in float64.
@@ -521,7 +546,11 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     damped by its own sensitivity. "levenberg": D = mean(diag) I, the same damping for every parameter. "sqrt": the
     geometric mean of the two, sqrt(diag * mean(diag)). "tensor": one value per parameter tensor, the mean of diag over
     that tensor (a block-Marquardt that keeps the relative scale of parameters within a weight matrix). All have the
-    same mean, so lam means roughly the same thing in each."""
+    same mean, so lam means roughly the same thing in each.
+    harmonic_weight: k, or None. Along every torus, the residual's angular harmonic n is weighted by max(n, 1)^k
+    (applied to the residual and its Jacobian rows by FFT; the weighting is symmetric, so J^T u becomes J^T W u). An
+    exact fit stays exact, but the high harmonics, whose directions are 1e-9..1e-15 as sensitive as the strongest
+    (spectral bias of the tanh shears), gain up to n^k against the low ones. Steps are accepted on the weighted loss."""
     from torch.func import functional_call, jacrev, vmap
     dev, dt = next(model.parameters()).device, next(model.parameters()).dtype
     names = [n for n, _ in model.named_parameters()]
@@ -558,12 +587,23 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
 
     sw = None  # sqrt of the per-point weights of the current step (host, flat), or None
 
+    hw_n = None if harmonic_weight is None else \
+        torch.arange(nS // 2 + 1, dtype=F64).clamp(min=1) ** harmonic_weight
+
+    def hweight(x, k_tori):
+        """Weight harmonic n of each torus's angular profile by n^k: x is (k_tori * nS, ...) on any device."""
+        if hw_n is None:
+            return x
+        xs = x.reshape(k_tori, nS, -1)
+        w = hw_n.to(xs.dtype).to(xs.device)[None, :, None]
+        return torch.fft.irfft(torch.fft.rfft(xs, dim=1) * w, n=nS, dim=1).reshape(x.shape)
+
     def resid_w(v):
-        r = resid(v)
+        r = hweight(resid(v), nO)
         return r if sw is None else r * sw
 
     def jtv_w(v, u):
-        return jtv(v, u if sw is None else sw * u)
+        return jtv(v, hweight(u if sw is None else sw * u, nO))
 
     def normal_eqs(v):
         P = v.numel()
@@ -594,6 +634,8 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
             del Jy
             dm = dH.mean(1, keepdim=True)
             Jm = ((dH - dm) * c1[..., None] - c2[..., None] * dm).reshape(k * nS, -1)
+            if hw_n is not None:
+                r = hweight(r, k); Jm = hweight(Jm, k)
             if sw is not None:
                 swc = sw[o0 * nS:(o0 + k) * nS]
                 r = r * swc; Jm = Jm * to_dev(swc)[:, None]
