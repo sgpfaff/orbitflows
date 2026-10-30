@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=orbitflows-lab
 #SBATCH --account=ctb-ripperda
-#SBATCH -p debug
+#SBATCH -p compute
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=24
 #SBATCH --time=02:00:00
 #SBATCH --output=results/slurm_lab_%j.out
-# One optim_lab.py experiment on one H100 (debug partition, up to 2 h). Usage, from the GPU login node inside
+# One optim_lab.py experiment on one H100 (up to 2 h; the debug partition caps single-node jobs at 1 h). Usage, from the GPU login node inside
 # $SCRATCH/.../performance/precision:  sbatch lab_gpu.sh damping results/mwteacher_v2/mwt_geo_s0 --iters 400 --out ...
 cd "$SLURM_SUBMIT_DIR"
 module load gcc arrow/24.0.0 >/dev/null 2>&1
