@@ -489,7 +489,7 @@ def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, esca
 def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ckpt=None, every=25,
              wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0, escale=None,
              geodesic=False, geo_h=0.1, geo_alpha=0.75, weight_fn=None, objective=None, damp_floor=1e-12,
-             retry_lam=None):
+             retry_lam=None, damping="marquardt"):
     """Levenberg-Marquardt on r_i / sqrt(N). Per-point Jacobians of the model outputs (vmap of jacrev) on
     the model's device/dtype, chained analytically through H (float64, host) and the per-torus mean;
     J^T J and J^T r are accumulated over chunks of tori (memory O(chunk * P + P^2)) and solved in float64.
@@ -516,7 +516,12 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     while lam is high, restart the damping sweep once from retry_lam before stopping. Near a stall lam can drift
     far above its usual value; trial steps then barely change the loss, every trial is rejected, and the run stops
     although a step from the usual lam (~1e-11 on MW) still descends. Without it (None), one failed iteration ends
-    the run, as before."""
+    the run, as before.
+    damping: the matrix D in (J^T J + lam D). "marquardt" (default): D = diag(J^T J) + damp_floor * max, each parameter
+    damped by its own sensitivity. "levenberg": D = mean(diag) I, the same damping for every parameter. "sqrt": the
+    geometric mean of the two, sqrt(diag * mean(diag)). "tensor": one value per parameter tensor, the mean of diag over
+    that tensor (a block-Marquardt that keeps the relative scale of parameters within a weight matrix). All have the
+    same mean, so lam means roughly the same thing in each."""
     from torch.func import functional_call, jacrev, vmap
     dev, dt = next(model.parameters()).device, next(model.parameters()).dtype
     names = [n for n, _ in model.named_parameters()]
@@ -597,6 +602,21 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
         return torch.cat(rs), to_host64(g), to_host64(A)
 
     v = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
+    tid = torch.repeat_interleave(torch.arange(len(sizes)), torch.tensor(sizes))
+    nsz = torch.tensor(sizes, dtype=F64)
+
+    def damp_vec(dg):
+        if damping == "marquardt":
+            return dg + damp_floor * dg.max()
+        if damping == "levenberg":
+            return torch.full_like(dg, float(dg.mean()))
+        if damping == "sqrt":
+            return torch.sqrt(dg * dg.mean()) + damp_floor * dg.max()
+        if damping == "tensor":
+            m = torch.zeros(len(sizes), dtype=dg.dtype).index_add_(0, tid, dg) / nsz
+            return m[tid] + damp_floor * dg.max()
+        raise ValueError(damping)
+
     hist, why, k = [], "max_iters", -1
     n_retry = 0
     t_start = time.perf_counter()
@@ -606,6 +626,7 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
         r, g, A = normal_eqs(v)
         f = 0.5 * float(r @ r) if objective is None else objective(resid(v))
         dg = torch.diagonal(A).clone()
+        Dv = damp_vec(dg)
         accepted = False
         lam_start = lam
         for trial in range(60 if retry_lam else 30):
@@ -614,7 +635,7 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
                     break
                 print(f"  LM it {it0 + k}: no descent step from lam {lam_start:.1e}; retrying from {retry_lam:.1e}", flush=True)
                 lam = retry_lam; n_retry += 1
-            L, info = torch.linalg.cholesky_ex(A + lam * torch.diag(dg + damp_floor * dg.max()))
+            L, info = torch.linalg.cholesky_ex(A + lam * torch.diag(Dv))
             if int(info) != 0:
                 lam *= 10; continue
             d = -torch.cholesky_solve(g[:, None], L)[:, 0]
