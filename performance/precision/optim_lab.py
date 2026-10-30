@@ -59,10 +59,20 @@ def setup(jd, device="cpu"):
 
     class Ev:  # the evaluator works on a float64 CPU copy of the model
         @staticmethod
-        def quick(m):
+        def cpu(m):
             if next(m.parameters()).device.type == "cpu":
-                return ev0.quick(m)
-            mc = build(0, "cpu"); mc.load_state_dict(C.state_f64(m)); return ev0.quick(mc)
+                return m
+            mc = build(0, "cpu"); mc.load_state_dict(C.state_f64(m)); return mc
+
+        @staticmethod
+        def quick(m):
+            return ev0.quick(Ev.cpu(m))
+
+        @staticmethod
+        def vs(m, target):
+            """Held-out mean of |H - <H>| / |<H>| against any target (e.g. a homotopy stage)."""
+            with torch.no_grad():
+                return float(C.residual_host(Ev.cpu(m), ev0.aa, target, *ev0.aa.shape[:2]).abs().mean())
     return cfg, t, aa, nO, nS, es, Ev, build
 
 
@@ -98,7 +108,10 @@ def homotopy(a):
         s = k / a.stages; last = k == a.stages
         target = t if last else Blend(t, s)
 
+        trace = []; own0 = ev.vs(m, target)  # held-out error against this stage's target, before its first step
+
         def rec(it, loss, lam_, tot0=tot):
+            trace.append((it, loss, lam_))
             if last and it % 50 == 0:
                 q = ev.quick(m); log.append(dict(stage=k, s=s, it=tot0 + it, eval_mean=q["eval_mean"], train_mean=q["train_mean"],
                                                  loss=loss, lam=lam_, t=time.perf_counter() - t0))
@@ -108,10 +121,14 @@ def homotopy(a):
                                  record=rec, every=1, escale=es, geodesic=True, retry_lam=1e-11, damping=a.damping,
                                  stall_window=None if last else 40, stall_rtol=None if last else 1e-3, chunk_orbits=a.chunk)
         tot += n
-        q = ev.quick(m)
+        q = ev.quick(m); own = ev.vs(m, target)
+        lams = [x[2] for x in trace]
+        st = dict(loss_start=trace[0][1], loss_end=trace[-1][1], own_heldout_start=own0, own_heldout=own, lam_min=min(lams), lam_max=max(lams),
+                  loss_trace=[(x[0], x[1]) for x in trace[::max(1, len(trace) // 30)]])
         log.append(dict(stage=k, s=s, it=tot, eval_mean=q["eval_mean"], train_mean=q["train_mean"], why=why, lam=lam,
-                        t=time.perf_counter() - t0))
-        print(f"stage {k:2d} s={s:.3f}: {n:4d} its ({why}), total {tot:6d}; held-out vs teacher {q['eval_mean']:.3e}, lam {lam:.1e}, "
+                        t=time.perf_counter() - t0, **st))
+        print(f"stage {k:2d} s={s:.3f}: {n:4d} its ({why}), total {tot:6d}; own target: loss {st['loss_start']:.2e} -> {st['loss_end']:.2e}, "
+              f"held-out {own0:.2e} -> {own:.2e}; vs teacher {q['eval_mean']:.3e}; lam {st['lam_min']:.0e}..{st['lam_max']:.0e}; "
               f"{(time.perf_counter() - t0) / 60:.1f} min", flush=True)
         json.dump(dict(mode="homotopy", job=a.job, seed=a.seed, stages=a.stages, stage_iters=a.stage_iters, damping=a.damping, log=log),
                   open(a.out, "w"), indent=1)
