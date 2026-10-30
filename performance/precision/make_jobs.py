@@ -57,6 +57,8 @@ Batches
              lam 1e-11 with retry_lam 1e-11: an iteration that finds no descent step restarts its damping sweep
              from 1e-11 before the run stops. Jobs that a restart from 1e-11 could not move, or moved by < 5e-5 per
              step, are left out (jobs/cont4_skip.json): 13 jobs.
+  fourier1 : 16 x 64 students of the 16-layer MW teacher with Fourier-term conditioners (12 frequencies, 1-100), from
+             scratch on H100s, seeds 0-1 (paired with the first bundle's mwt_geo_s0/s1: same initial network).
   cont4g   : the same 13 jobs on one H100 each (Trillium GPU cluster), LM in float64 on CUDA; results in cont4g_v2/.
   ladder   : (A) SHO with the exact toy: the answer is the identity, which the flow represents exactly;
              (B) SHO with a wrong toy frequency: the answer is a linear rescaling, which tanh shears reach
@@ -212,6 +214,15 @@ def main():
     # LM in float64 on CUDA with 96 tori per Jacobian chunk (benchmark: 4-10x faster per job than 6 CPU threads)
     batches["cont4g"] = [dict(j, batch="cont4g_v2", stages=j["stages"][:-1] + [dict(j["stages"][-1], device="cuda", chunk_orbits=96)])
                          for j in batches["cont4"]]
+
+    # ---- breaking the optimisation floor: Fourier-term conditioners (H100s, trillium_gpu_array.sh) ----
+    # students of the 16-layer MW teacher, as the first bundle's mwt_geo (same seeds, so the same initial network plus zero
+    # Fourier terms), with FourierNNConditioner: 12 frequencies log-spaced from 1 to 100. LM on CUDA with the retry rule.
+    gpu_stages = [dict(kind="adam", device="cuda", dtype="float64", steps=3000, lr=1e-3),
+                  dict(kind="lm", device="cuda", dtype="float64", max_iters=200000, wall_hours=68.0, stall_window=1000,
+                       stall_rtol=1e-5, every=25, geodesic=True, retry_lam=1e-11, chunk_orbits=96)]
+    batches["fourier1"] = [job(f"mwt_ff12_s{s}", "fourier1", p, target="teacher", teacher=dict(checkpoint="teachers/mw_fixed_std_s1.pt"),
+                               model=dict(fourier=dict(n=12, max=100.0)), seed=s, stages=gpu_stages) for s in (0, 1)]
 
     for b, jobs in batches.items():
         path = os.path.join(HERE, "jobs", f"{b}_{p}.jsonl")
