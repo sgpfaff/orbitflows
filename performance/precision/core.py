@@ -528,7 +528,7 @@ def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, esca
 def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ckpt=None, every=25,
              wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0, escale=None,
              geodesic=False, geo_h=0.1, geo_alpha=0.75, weight_fn=None, objective=None, damp_floor=1e-12,
-             retry_lam=None, damping="marquardt", harmonic_weight=None):
+             retry_lam=None, damping="marquardt", harmonic_weight=None, loss="energy", expose=None):
     """Levenberg-Marquardt on r_i / sqrt(N). Per-point Jacobians of the model outputs (vmap of jacrev) on
     the model's device/dtype, chained analytically through H (float64, host) and the per-torus mean;
     J^T J and J^T r are accumulated over chunks of tori (memory O(chunk * P + P^2)) and solved in float64.
@@ -564,7 +564,15 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     harmonic_weight: k, or None. Along every torus, the residual's angular harmonic n is weighted by max(n, 1)^k
     (applied to the residual and its Jacobian rows by FFT; the weighting is symmetric, so J^T u becomes J^T W u). An
     exact fit stays exact, but the high harmonics, whose directions are 1e-9..1e-15 as sensitive as the strongest
-    (spectral bias of the tanh shears), gain up to n^k against the low ones. Steps are accepted on the weighted loss."""
+    (spectral bias of the tanh shears), gain up to n^k against the low ones. Steps are accepted on the weighted loss.
+    loss: "energy" (default; the energy variance along each torus) or "invariance", the invariance equation of the
+    parameterization method: along each torus, omega(J) dx/dtheta = X_H(x) = (dH/dp, -dH/dq). The residual has two
+    components per point, each scaled by the toy torus's velocity in that coordinate (sqrt(2 nu0 E), nu0 sqrt(2 nu0 E),
+    E = escale, which is required), and omega is eliminated per torus by least squares (variable projection; the
+    Jacobian includes d omega / d parameters exactly). For an exactly symplectic model, with K = H(x(theta, J)), the
+    residual equals (omega - dK/dJ) dx/dtheta + (dK/dtheta) dx/dJ, so this loss is a first-derivative (Sobolev) norm of
+    the energy residual in (theta, J) rather than new information.
+    expose: optional dict; the residual, J^T u and normal-equation closures are put in it (for tests)."""
     from torch.func import functional_call, jacrev, vmap
     dev, dt = next(model.parameters()).device, next(model.parameters()).dtype
     names = [n for n, _ in model.named_parameters()]
@@ -599,6 +607,74 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
         r = ((H - m) / (escale if escale is not None else m.abs()) / sN).reshape(-1)
         return to_host64(torch.autograd.grad(r, vv, grad_outputs=u.to(r.dtype))[0])
 
+    if loss == "invariance":
+        assert weight_fn is None and harmonic_weight is None and escale is not None
+        # velocity scales of each toy torus in q and p: (nO, 2), host float64
+        s_tor = torch.sqrt(2 * escale.reshape(nO, 1).to(F64)) * torch.tensor([1.0, float(target.nu0)], dtype=F64)
+        e_th = torch.tensor([1.0, 0.0], dtype=dt, device=dev)
+
+        def ya(p, x):
+            """The model's image y and its angle derivative a = dy/dtheta at the (theta, J) rows of x."""
+            return torch.func.jvp(lambda z: functional_call(model, p, (z,)), (x,), (e_th.expand_as(x),))
+
+        def inv_r(A, B):
+            """Scaled residual omega A - B per torus, A, B (k, nS, 2), omega by least squares; returns (r, omega)."""
+            om = (A * B).sum((1, 2)) / (A * A).sum((1, 2))
+            return (om[:, None, None] * A - B) / sN, om
+
+        def xh(y64, second=False):
+            """X_H = (dH/dp, -dH/dq) at y (n, 2), host float64; with second=True also dX_H/dy (n, 2, 2)."""
+            y64 = y64.detach().requires_grad_(True)
+            with torch.enable_grad():
+                g_ = torch.autograd.grad(target.H(y64).sum(), y64, create_graph=second)[0]
+                b = torch.stack([g_[:, 1], -g_[:, 0]], -1)
+                if not second:
+                    return b.detach(), None
+                hq = torch.autograd.grad(g_[:, 0].sum(), y64, retain_graph=True)[0]
+                hp = torch.autograd.grad(g_[:, 1].sum(), y64)[0]
+            return b.detach(), torch.stack([hp, -hq], 1)
+
+        def resid(v):  # noqa: F811
+            y, a = ya(unflat(v), aa_dev.reshape(-1, 2))
+            b, _ = xh(to_host64(y))
+            s3 = s_tor[:, None, :]
+            return inv_r(to_host64(a).view(nO, nS, 2) / s3, b.view(nO, nS, 2) / s3)[0].reshape(-1)
+
+        def jtv(v, u):  # noqa: F811
+            vv = v.detach().clone().requires_grad_(True)
+            y, a = ya(unflat(vv), aa_dev.reshape(-1, 2))
+            y = y.cpu().double() if (y.dtype != F64 or y.device != HOST) else y
+            a = a.cpu().double() if (a.dtype != F64 or a.device != HOST) else a
+            g_ = torch.autograd.grad(target.H(y).sum(), y, create_graph=True)[0]
+            b = torch.stack([g_[:, 1], -g_[:, 0]], -1)
+            s3 = s_tor[:, None, :]
+            r = inv_r(a.view(nO, nS, 2) / s3, b.view(nO, nS, 2) / s3)[0].reshape(-1)
+            return to_host64(torch.autograd.grad(r, vv, grad_outputs=u.to(r.dtype))[0])
+
+        def f_point_ya(p, x):
+            y, a = ya(p, x[None, :])
+            return torch.cat([y[0], a[0]])
+
+        def inv_chunk(v, x, o0, k):
+            """Residual (k nS 2,) and its Jacobian (k nS 2, P) for the tori o0 .. o0 + k."""
+            Jd = vmap(jacrev(f_point_ya), in_dims=(None, 0))(unflat(v), x)
+            Jya = torch.cat([Jd[n].reshape(x.shape[0], 4, -1) for n in names], -1)  # (k nS, 4, P): d(y, a)/dv
+            del Jd
+            y, a = ya(unflat(v), x)
+            b, Db = xh(to_host64(y), second=True)
+            sp = s_tor[o0:o0 + k].repeat_interleave(nS, 0)                             # (k nS, 2)
+            A = (to_host64(a) / sp).view(k, nS, 2); B = (b / sp).view(k, nS, 2)
+            r, om = inv_r(A, B)
+            spd = to_dev(sp)[..., None]
+            JA = (Jya[:, 2:] / spd).view(k, nS, 2, -1)
+            JB = (torch.einsum("nij,njp->nip", to_dev(Db), Jya[:, :2]) / spd).view(k, nS, 2, -1)
+            del Jya
+            Ad, Bd, omd = to_dev(A)[..., None], to_dev(B)[..., None], to_dev(om)
+            SAA = to_dev((A * A).sum((1, 2)))
+            dom = ((JA * Bd + Ad * JB).sum((1, 2)) - 2 * omd[:, None] * (Ad * JA).sum((1, 2))) / SAA[:, None]  # (k, P)
+            Jm = ((dom[:, None, None, :] * Ad + omd[:, None, None, None] * JA - JB) / sN).reshape(k * nS * 2, -1)
+            return r.reshape(-1), Jm
+
     sw = None  # sqrt of the per-point weights of the current step (host, flat), or None
 
     hw_n = None if harmonic_weight is None else \
@@ -625,6 +701,11 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
         for o0 in range(0, nO, chunk_orbits):
             sl = aa_dev[o0:o0 + chunk_orbits]; k = sl.shape[0]
             x = sl.reshape(-1, 2)
+            if loss == "invariance":
+                r, Jm = inv_chunk(v, x, o0, k)
+                A += Jm.T @ Jm; g += Jm.T @ to_dev(r)
+                rs.append(r)
+                continue
             # Jacobian w.r.t. the parameter dict, then concatenated: identical to differentiating w.r.t. the
             # flat vector v, but ~20x cheaper (slicing v makes every per-point backward build a dense (n, P) array)
             Jd = vmap(jacrev(f_point), in_dims=(None, 0))(unflat(v), x)
@@ -657,6 +738,8 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
             rs.append(r)
         return torch.cat(rs), to_host64(g), to_host64(A)
 
+    if expose is not None:
+        expose.update(resid=resid, jtv=jtv, normal_eqs=normal_eqs)
     v = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
     tid = torch.repeat_interleave(torch.arange(len(sizes)), torch.tensor(sizes))
     nsz = torch.tensor(sizes, dtype=F64)

@@ -10,7 +10,8 @@ bed for changes to the optimiser.
     production runs use 512), --wall SECONDS caps each damping variant's run, --save PATH keeps the last variant's state.
 
 damping: from the stalled student's checkpoint, the same number of LM iterations (geodesic, retry_lam 1e-11) with each
-  damping matrix (core.train_lm damping=; floor6 is Marquardt with damp_floor 1e-6), or with the residual's angular
+  damping matrix (core.train_lm damping=; floor6 is Marquardt with damp_floor 1e-6), or on the invariance-equation loss
+  (inv: core.train_lm loss="invariance"; the held-out error reported is still the energy error), or with the residual's angular
   harmonics weighted by n^k (core.train_lm harmonic_weight=K): harmK accepts steps only if they lower the true loss,
   harmKw on the weighted loss. Escaping the stall shows as a
   drop in the held-out error against the teacher.
@@ -100,7 +101,8 @@ def damping(a):
             m = build(cfg.get("seed", 0)); m.load_state_dict({k: v_.to(a.device) for k, v_ in st["state"].items()})
         mode, floor, hk = ("marquardt", 1e-6, None) if v == "floor6" else \
             (("marquardt", 1e-12, float(v[4:].rstrip("w"))) if v.startswith("harm") else
-             ("marquardt", 1e-12, None) if v.startswith("fourier") else (v, 1e-12, None))
+             ("marquardt", 1e-12, None) if (v.startswith("fourier") or v == "inv") else (v, 1e-12, None))
+        lossname = "invariance" if v == "inv" else "energy"
         # harmK: the weighted loss sets the step, but a step is accepted only if it lowers the true loss; harmKw: accepted on the weighted loss
         obj = (lambda r: 0.5 * float(r @ r)) if (hk is not None and not v.endswith("w")) else None
         e0 = ev.quick(m); curve = [(0, e0["eval_mean"], e0["train_mean"], float("nan"))]; t0 = time.perf_counter()
@@ -115,7 +117,7 @@ def damping(a):
                           open(a.out, "w"), indent=1)
         n, why, lam = C.train_lm(m, aa, t, nO, nS, max_iters=a.iters, lam=a.lam0, record=rec, every=1, escale=es, geodesic=True,
                                  retry_lam=1e-11, damping=mode, damp_floor=floor, chunk_orbits=a.chunk, harmonic_weight=hk,
-                                 objective=obj, wall_cap=a.wall)
+                                 objective=obj, wall_cap=a.wall, loss=lossname)
         if a.save:
             torch.save(dict(state={k: x.detach().cpu() for k, x in m.state_dict().items()}, lam=lam, it=n, n_steps=nS), a.save)
         q = ev.quick(m); curve.append((n, q["eval_mean"], q["train_mean"], lam))
