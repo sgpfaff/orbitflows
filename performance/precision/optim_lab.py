@@ -6,6 +6,8 @@ bed for changes to the optimiser.
 
     python optim_lab.py damping  STUDENT_JOB_DIR [--iters 400] [--variants marquardt,levenberg,sqrt,tensor,floor6]
     python optim_lab.py homotopy STUDENT_JOB_DIR [--stages 20] [--stage-iters 150] [--final-iters 3000] [--seed 0]
+    common options: --n-steps N trains on N angles per torus instead of the job's (the teacher students used 128;
+    production runs use 512), --wall SECONDS caps each damping variant's run, --save PATH keeps the last variant's state.
 
 damping: from the stalled student's checkpoint, the same number of LM iterations (geodesic, retry_lam 1e-11) with each
   damping matrix (core.train_lm damping=; floor6 is Marquardt with damp_floor 1e-6), or with the residual's angular
@@ -47,8 +49,10 @@ class Blend:
         return sho if self.s == 0 else (1 - self.s) * sho + self.s * self.t.H(ps)
 
 
-def setup(jd, device="cpu"):
+def setup(jd, device="cpu", n_steps=None):
     cfg = json.load(open(os.path.join(jd, "config.json")))
+    if n_steps:
+        cfg["data"]["n_steps"] = n_steps
     cfg["teacher"]["checkpoint"] = os.path.join(HERE, cfg["teacher"]["checkpoint"]) \
         if not os.path.isabs(cfg["teacher"]["checkpoint"]) else cfg["teacher"]["checkpoint"]
     t = C.make_target(cfg); d = cfg["data"]; mw = C.MWVertical()
@@ -81,7 +85,7 @@ def setup(jd, device="cpu"):
 
 
 def damping(a):
-    cfg, t, aa, nO, nS, es, ev, build = setup(a.job, a.device)
+    cfg, t, aa, nO, nS, es, ev, build = setup(a.job, a.device, a.n_steps)
     J_range = ev.J_range
     st = torch.load(os.path.join(a.job, "state.pt"), weights_only=False)
     rows = []
@@ -104,19 +108,26 @@ def damping(a):
         def rec(it, loss, lam):
             if it % 25 == 0:
                 q = ev.quick(m); curve.append((it, q["eval_mean"], q["train_mean"], lam))
+            if it % 250 == 0 and it:  # progress, and a partial record in case the job is cut off
+                print(f"   {v} step {it:5d}: held-out {curve[-1][1]:.3e}  train {curve[-1][2]:.3e}  lam {lam:.1e}  "
+                      f"{(time.perf_counter() - t0) / 60:.1f} min", flush=True)
+                json.dump(dict(mode="damping", job=a.job, n_steps=nS, rows=rows + [dict(variant=v, partial=True, curve=curve)]),
+                          open(a.out, "w"), indent=1)
         n, why, lam = C.train_lm(m, aa, t, nO, nS, max_iters=a.iters, lam=a.lam0, record=rec, every=1, escale=es, geodesic=True,
                                  retry_lam=1e-11, damping=mode, damp_floor=floor, chunk_orbits=a.chunk, harmonic_weight=hk,
-                                 objective=obj)
+                                 objective=obj, wall_cap=a.wall)
+        if a.save:
+            torch.save(dict(state={k: x.detach().cpu() for k, x in m.state_dict().items()}, lam=lam, it=n, n_steps=nS), a.save)
         q = ev.quick(m); curve.append((n, q["eval_mean"], q["train_mean"], lam))
         rows.append(dict(variant=v, iters=n, why=why, s=time.perf_counter() - t0, start=e0["eval_mean"], end=q["eval_mean"],
                          end_max=q["eval_max"], train_end=q["train_mean"], curve=curve))
         print(f"{v:10s} {n:4d} its ({why:10s}, {time.perf_counter() - t0:5.0f} s): held-out {e0['eval_mean']:.3e} -> {q['eval_mean']:.3e} "
               f"(x{e0['eval_mean'] / q['eval_mean']:.2f})  train {q['train_mean']:.2e}  lam {lam:.1e}", flush=True)
-        json.dump(dict(mode="damping", job=a.job, rows=rows), open(a.out, "w"), indent=1)
+        json.dump(dict(mode="damping", job=a.job, n_steps=nS, rows=rows), open(a.out, "w"), indent=1)
 
 
 def homotopy(a):
-    cfg, t, aa, nO, nS, es, ev, build = setup(a.job, a.device)
+    cfg, t, aa, nO, nS, es, ev, build = setup(a.job, a.device, a.n_steps)
     m = build(a.seed)
     log, tot, lam, t0 = [], 0, a.lam0, time.perf_counter()
     q = ev.quick(m); log.append(dict(stage=0, s=0.0, it=0, eval_mean=q["eval_mean"], t=0.0))
@@ -159,6 +170,9 @@ def main():
     ap.add_argument("--stages", type=int, default=20); ap.add_argument("--stage-iters", type=int, default=150)
     ap.add_argument("--final-iters", type=int, default=3000); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--damping", default="marquardt"); ap.add_argument("--out", default=None)
+    ap.add_argument("--n-steps", type=int, default=None, help="angles per training torus (default: the job's)")
+    ap.add_argument("--wall", type=float, default=None, help="wall-clock cap per damping variant, seconds")
+    ap.add_argument("--save", default=None, help="save the last damping variant's state here")
     ap.add_argument("--device", default="cpu"); ap.add_argument("--chunk", type=int, default=16, help="tori per Jacobian chunk")
     a = ap.parse_args()
     a.out = a.out or os.path.join(HERE, f"optim_lab_{a.mode}.json")
