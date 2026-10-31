@@ -89,13 +89,13 @@ class Teacher:
             ck = torch.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), checkpoint), weights_only=False)
             mc = ck["model"]
             cond = OddNNConditioner if mc.get("odd", False) else SimpleNNConditioner
-            self.T = Flow(2, mc["n_layers"], SymplecticCouplingLayer, cond,
-                          dict(num_layers=mc.get("depth", 2), projection_dims=mc["width"],
-                               activation=ACTS[mc.get("act", "tanh")], include_bias=True)).to(F64)
+            self.omega = self.nu0 = float(ck["omega"])
+            self.T = make_flow(mc, cond, dict(num_layers=mc.get("depth", 2), projection_dims=mc["width"],
+                                              activation=ACTS[mc.get("act", "tanh")], include_bias=True),
+                               self.omega).to(F64)
             self.T.load_state_dict(ck["flow_state"])
             for p in self.T.parameters():
                 p.requires_grad_(False)
-            self.omega = self.nu0 = float(ck["omega"])
             return
         torch.manual_seed(seed)
         self.T = Flow(2, n_layers, SymplecticCouplingLayer, SimpleNNConditioner,
@@ -358,6 +358,40 @@ class OddNNConditioner(SimpleNNConditioner):
         return 0.5 * (super().forward(inputs) - super().forward(-inputs))
 
 
+GOLDEN = math.pi * (3 - math.sqrt(5))  # the golden angle, 137.5 deg
+
+
+class RotatedCouplingLayer(SymplecticCouplingLayer):
+    """The repo shear along a rotated direction: M^-1 S M x, with M the rotation by phi in the toy's normalised
+    coordinates (q sqrt(omega), p / sqrt(omega)), where its tori are circles: M = [[c, -s/omega], [s omega, c]].
+    det M = 1, so the layer is exactly symplectic, with the closed-form inverse M^-1 S^-1 M; phi = 0 is the plain
+    layer. M is a fixed buffer: no parameters are added and the conditioner is initialised as in the plain flow."""
+
+    def __init__(self, conditioner, update_q, phi, omega):
+        super().__init__(conditioner, update_q)
+        c, s = math.cos(phi), math.sin(phi)
+        self.register_buffer("rot", torch.tensor([[c, -s / omega], [s * omega, c]], dtype=torch.float64))
+        self.register_buffer("rot_inv", torch.tensor([[c, s / omega], [-s * omega, c]], dtype=torch.float64))
+
+    def forward(self, x):
+        return super().forward(x @ self.rot.T) @ self.rot_inv.T
+
+    def inverse(self, y):
+        return super().inverse(y @ self.rot.T) @ self.rot_inv.T
+
+
+def make_flow(mcfg, cond, cargs, omega):
+    """The shear flow of a model config. rotate="golden" turns layer k's shear by k golden angles (layer 0 is plain), so
+    no two layers shear along the same direction (with the q/p alternation the directions spread evenly mod 180 deg)."""
+    rot = mcfg.get("rotate")
+    if not rot:
+        return Flow(2, mcfg["n_layers"], SymplecticCouplingLayer, cond, cargs)
+    assert rot == "golden", rot
+    phis = iter([k * GOLDEN for k in range(mcfg["n_layers"])])
+    return Flow(2, mcfg["n_layers"], lambda conditioner, update_q: RotatedCouplingLayer(conditioner, update_q, next(phis), omega),
+                cond, cargs)
+
+
 class AAMap(torch.nn.Module):
     def __init__(self, toy, flow):
         super().__init__()
@@ -376,7 +410,7 @@ def build_model(mcfg, toy_cfg, omega0, J_lo, J_hi, seed, dtype=F64, device=HOST)
         cond = FourierNNConditioner
         cargs.update(n_freq=mcfg["fourier"].get("n", 12), w_max=mcfg["fourier"].get("max", 100.0),
                      modulate=mcfg["fourier"].get("modulate", 0))
-    flow = Flow(2, mcfg["n_layers"], SymplecticCouplingLayer, cond, cargs)
+    flow = make_flow(mcfg, cond, cargs, omega0)
     g = torch.Generator().manual_seed(1000 + seed)
     with torch.no_grad():
         if mcfg.get("bias_init", "torch") == "torch":  # PyTorch default U(-1/sqrt(fan_in), 1/sqrt(fan_in))

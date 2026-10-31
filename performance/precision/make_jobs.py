@@ -61,6 +61,11 @@ Batches
              scratch on H100s, seeds 0-1 (paired with the first bundle's mwt_geo_s0/s1: same initial network).
   fourier2 : the same with amplitude-modulated Fourier terms (A_j(x) = a_j + sum_k C_jk tanh(U_k x + V_k), 8 shared
              tanh units per layer), seed 0.
+  rotmw    : 16 x 64 MW models with rotated shears (model.rotate = "golden": layer k shears along a direction turned by k
+             golden angles in the toy's normalised coordinates; same parameters and, per seed, the same initial network
+             as the plain model), with the plain MW teachers' recipe (recipe's rec_fixed_std: fixed nu0, Adam 3000 then
+             LM until the loss falls < 0.1% in 300 steps) on H100s, seeds 0-2. Compare with rec_fixed_std_s0-2
+             (2.4e-5, 1.8e-5, 3.5e-5); the best seed becomes a rotated teacher for rotated students.
   cont4g   : the same 13 jobs on one H100 each (Trillium GPU cluster), LM in float64 on CUDA; results in cont4g_v2/.
   ladder   : (A) SHO with the exact toy: the answer is the identity, which the flow represents exactly;
              (B) SHO with a wrong toy frequency: the answer is a linear rescaling, which tanh shears reach
@@ -228,6 +233,13 @@ def main():
     # the same with amplitude-modulated Fourier terms (8 shared tanh units per layer), seed 0 (paired with mwt_geo_s0)
     batches["fourier2"] = [job(f"mwt_ffm12_s{s}", "fourier2", p, target="teacher", teacher=dict(checkpoint="teachers/mw_fixed_std_s1.pt"),
                                model=dict(fourier=dict(n=12, max=100.0, modulate=8)), seed=s, stages=gpu_stages) for s in (0,)]
+
+    # ---- rotated shears: MW models first (a direct comparison with the plain 16 x 64, and a rotated teacher) ----
+    rot_stages = [dict(kind="adam", device="cuda", dtype="float64", steps=3000, lr=1e-3),
+                  dict(kind="lm", device="cuda", dtype="float64", max_iters=200000, wall_hours=3.0, stall_window=300,
+                       stall_rtol=1e-3, every=25, geodesic=False, chunk_orbits=96)]
+    batches["rotmw"] = [job(f"rot_fixed_std_s{s}", "rotmw", p, model=dict(rotate="golden"), toy=dict(mode="fixed", omega="nu0", n_cheb=6),
+                            seed=s, stages=rot_stages) for s in range(3)]
 
     for b, jobs in batches.items():
         path = os.path.join(HERE, "jobs", f"{b}_{p}.jsonl")
