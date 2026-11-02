@@ -66,6 +66,12 @@ Batches
              as the plain model), with the plain MW teachers' recipe (recipe's rec_fixed_std: fixed nu0, Adam 3000 then
              LM until the loss falls < 0.1% in 300 steps) on H100s, seeds 0-2. Compare with rec_fixed_std_s0-2
              (2.4e-5, 1.8e-5, 3.5e-5); the best seed becomes a rotated teacher for rotated students.
+  gauge    : the energy loss leaves the twist theta -> theta + g(J) free, and every 16- and 32-layer student of the 16-layer
+             teacher sits at g = 1.8-2.9 rad (gauge_lab.py twist), in the teacher's time-reversed sector. mwt_coord_s0: a
+             fresh 16 x 64 student, seed 0 (mwt_geo_s0's starting network), trained on the coordinates of the teacher's own
+             map (loss "coord"), which pins g = 0, at 256 angles, 1 h of LM on an H100. Its energy error against the
+             teacher is the test-bed floor without the gauge freedom. (The other gauge tests start from states built by
+             gauge_lab.py and run with optim_lab.py.)
   deep2g   : the three mwt16deep students (32 x 64 on the 16-layer teacher, stopped by the second bundle's 12 h limit at
              5.1-9.6e-6 after 8.0-8.8k LM steps, still falling) continued on H100s with the cont4g LM recipe (lam 1e-11,
              retry_lam 1e-11, geodesic, 1,000-step stall rule), on their own 128 angles; and seed 0 also on 512 angles,
@@ -244,6 +250,13 @@ def main():
                        stall_rtol=1e-3, every=25, geodesic=False, chunk_orbits=96)]
     batches["rotmw"] = [job(f"rot_fixed_std_s{s}", "rotmw", p, model=dict(rotate="golden"), toy=dict(mode="fixed", omega="nu0", n_cheb=6),
                             seed=s, stages=rot_stages) for s in range(3)]
+
+    # ---- the twist gauge: a student trained on the teacher's coordinates (gauge pinned), 256 angles ----
+    coord_stages = [dict(kind="adam", device="cuda", dtype="float64", steps=3000, lr=1e-3),
+                    dict(kind="lm", device="cuda", dtype="float64", max_iters=200000, wall_hours=1.0, stall_window=1000,
+                         stall_rtol=1e-5, every=25, geodesic=True, retry_lam=1e-11, chunk_orbits=96)]
+    batches["gauge"] = [job("mwt_coord_s0", "gauge", p, target="teacher", teacher=dict(checkpoint="teachers/mw_fixed_std_s1.pt"),
+                            data=dict(MW_DATA, n_steps=256), seed=0, loss="coord", stages=coord_stages)]
 
     # ---- experiment 2: does depth remove the optimisation floor? the 32-layer students continued to convergence ----
     def cont_deep(j, n_steps=None):

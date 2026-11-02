@@ -42,22 +42,72 @@ RO_KPC = 8.0  # galpy natural length unit
 
 # ============================================================================ targets
 class MWVertical:
-    """Vertical MWPotential2014 at R = 1 (natural units), Phi(0) = 0 computed in float64."""
+    """Vertical MWPotential2014 at R = 1 (natural units), Phi(0) = 0 computed in float64.
+
+    dphi="direct" (default) evaluates Phi(z) - Phi(0) as written, which loses digits to cancellation near the midplane
+    (|Phi(0)| = 1.37, so the relative energy resolution is ~1e-10 at z_max 5 pc and ~1e-13 at 150 pc). At the 2e-8
+    MW models that rounding noise dominates the loss gradient (the 5 pc torus). dphi="cancellation_free" uses
+    mw_dphi, which never subtracts two O(1) numbers. nu0 is computed the same way in both modes."""
     name = "mw"
 
-    def __init__(self):
+    def __init__(self, dphi="direct"):
+        assert dphi in ("direct", "cancellation_free"), dphi
         self.R = torch.tensor(1.0, dtype=F64)
         self.amp = torch.tensor(1.0, dtype=F64)
         self.phi0 = MWPotential2014(torch.zeros((), dtype=F64), self.R, amp=self.amp).detach()
+        self.dphi = "direct"
         z = torch.zeros((), dtype=F64, requires_grad=True)
         d1 = torch.autograd.grad(self.phi(z), z, create_graph=True)[0]
         self.nu0 = float(torch.autograd.grad(d1, z)[0]) ** 0.5
+        self.dphi = dphi
 
     def phi(self, q):
+        if self.dphi == "cancellation_free":
+            return mw_dphi(q)
         return MWPotential2014(q, self.R, amp=self.amp) - self.phi0
 
     def H(self, ps):
         return 0.5 * ps[..., 1] ** 2 + self.phi(ps[..., 0])
+
+
+# MWPotential2014 at R = 1 (natural units, R0 = 8 kpc), amplitudes from the radial-force fractions 0.6 / 0.35 / 0.05
+_MN_A, _MN_B = 3.0 / 8.0, 0.28 / 8.0
+_MN_AMP = 0.6 * (1 + (_MN_A + _MN_B) ** 2) ** 1.5
+_NFW_A = 2.0
+_NFW_AMP = 0.35 / (math.log(1 + 1 / _NFW_A) - 1 / (1 + _NFW_A))
+_BUL_ALPHA, _BUL_RC = 1.8, 1.9 / 8.0
+_BUL_K = 1.5 - _BUL_ALPHA / 2
+_BUL_AMP = 0.05 / (2 * math.pi * _BUL_RC ** (3 - _BUL_ALPHA) * math.gamma(_BUL_K)
+                   * float(torch.special.gammainc(torch.tensor(_BUL_K, dtype=F64), torch.tensor(1 / _BUL_RC ** 2, dtype=F64))))
+_GL16 = {}
+
+
+def _gl16(like):
+    """16-point Gauss-Legendre nodes and weights on [0, 1], on like's device and dtype."""
+    key = (like.device, like.dtype)
+    if key not in _GL16:
+        k = torch.arange(1, 16, dtype=F64); beta = k / torch.sqrt(4 * k * k - 1)
+        x, V = torch.linalg.eigh(torch.diag(beta, 1) + torch.diag(beta, -1))
+        _GL16[key] = (((x + 1) / 2).to(like), (V[0, :] ** 2).to(like))
+    return _GL16[key]
+
+
+def mw_dphi(z):
+    """Phi(z) - Phi(0) of vertical MWPotential2014 at R = 1 without cancellation (differentiable, any device).
+    Miyamoto-Nagai: s - b = z^2/(s + b) and D_z - D_0 = (s - b)(2a + s + b)/(D_z + D_0); NFW: r - 1 = z^2/(r + 1) and
+    log1p; bulge (power law with cutoff): the integral of GM(<r')/r'^2 from 1 to r by 16-point Gauss-Legendre."""
+    z2 = z * z
+    s = torch.sqrt(z2 + _MN_B ** 2); sb = z2 / (s + _MN_B)
+    D0 = math.sqrt(1 + (_MN_A + _MN_B) ** 2); Dz = torch.sqrt(1 + (_MN_A + s) ** 2)
+    mn = _MN_AMP * (sb * (2 * _MN_A + s + _MN_B) / (Dz + D0)) / (D0 * Dz)
+    r = torch.sqrt(1 + z2); dl = z2 / (r + 1)
+    nfw = (_NFW_AMP / r) * (math.log(1 + 1 / _NFW_A) * dl - torch.log1p(dl / (_NFW_A + 1)))
+    x, w = _gl16(z)
+    rp = 1 + dl[..., None] * x
+    M = 2 * math.pi * _BUL_RC ** (3 - _BUL_ALPHA) * math.gamma(_BUL_K) * torch.special.gammainc(
+        torch.full_like(rp, _BUL_K), (rp / _BUL_RC) ** 2)
+    bul = _BUL_AMP * dl * (w * M / rp ** 2).sum(-1)
+    return mn + nfw + bul
 
 
 class SHO:
@@ -117,6 +167,12 @@ class Teacher:
         z = self.T.inverse(ps)
         return 0.5 * z[..., 1] ** 2 + 0.5 * (self.omega * z[..., 0]) ** 2
 
+    def aa_map(self, aa):
+        """The teacher's own action-angle map: T applied to the fixed toy ellipse (theta, J) -> (q, p)."""
+        th, J = aa[..., 0], aa[..., 1]
+        w = self.omega
+        return self.T(torch.stack([torch.sqrt(2 * J / w) * torch.cos(th), -torch.sqrt(2 * J * w) * torch.sin(th)], -1))
+
 
 def save_teacher(job_dir, out_path):
     """Freeze a finished fixed-toy job (config.json + state.pt) as a teacher file for Teacher(checkpoint=...)."""
@@ -132,7 +188,7 @@ def save_teacher(job_dir, out_path):
 def make_target(cfg):
     t = cfg["target"]
     if t == "mw":
-        return MWVertical()
+        return MWVertical(cfg.get("mw_dphi", "direct"))
     if t == "sho":
         return SHO(cfg.get("omega_target", 1.0))
     if t == "teacher":
@@ -547,16 +603,38 @@ class Evaluator:
 
 
 # ========================================================================= trainers
-def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, escale=None):
+def coord_scale(escale, omega):
+    """Per-torus coordinate scales of the toy ellipse, (nO, 2): the amplitudes sqrt(2J/omega) in q and sqrt(2J omega) in
+    p, from escale = omega J."""
+    return torch.sqrt(2 * escale.reshape(-1, 1).to(F64)) * torch.tensor([1 / omega, 1.0], dtype=F64)
+
+
+def coord_residual_host(model, aa_dev, y_ref, nO, nS, escale, omega):
+    """(model(theta, J) - y_ref) / torus amplitude, (nO, nS, 2) on the host in float64 (differentiable)."""
+    y = model(aa_dev.reshape(-1, 2))
+    y = y.cpu().double() if (y.dtype != F64 or y.device != HOST) else y
+    return (y.view(nO, nS, 2) - y_ref.view(nO, nS, 2)) / coord_scale(escale, omega)[:, None, :]
+
+
+def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, escale=None, loss="energy"):
+    """Adam on the energy residual, or (loss="coord", teacher targets only) on the coordinate residual against the
+    teacher's own map, which pins the twist gauge theta -> theta + g(J) that the energy loss leaves free."""
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=steps, eta_min=0.0)
+    if loss == "coord":
+        assert escale is not None
+        with torch.no_grad():
+            y_ref = target.aa_map(aa_dev.reshape(-1, 2).cpu().double())
     for k in range(steps):
-        loss = residual_host(model, aa_dev, target, nO, nS, escale).pow(2).mean()
+        if loss == "coord":
+            loss_ = coord_residual_host(model, aa_dev, y_ref, nO, nS, escale, target.nu0).pow(2).sum(-1).mean()
+        else:
+            loss_ = residual_host(model, aa_dev, target, nO, nS, escale).pow(2).mean()
         opt.zero_grad(set_to_none=True)
-        loss.backward()
+        loss_.backward()
         opt.step(); sch.step()
         if k % every == 0 or k == steps - 1:
-            record(k, float(loss), opt.param_groups[0]["lr"])
+            record(k, float(loss_), opt.param_groups[0]["lr"])
 
 
 def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ckpt=None, every=25,
@@ -606,6 +684,10 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     Jacobian includes d omega / d parameters exactly). For an exactly symplectic model, with K = H(x(theta, J)), the
     residual equals (omega - dK/dJ) dx/dtheta + (dK/dtheta) dx/dJ, so this loss is a first-derivative (Sobolev) norm of
     the energy residual in (theta, J) rather than new information.
+    loss="coord" (teacher targets only, escale required): the residual is (x(theta, J) - x_T(theta, J)) / (toy ellipse's
+    amplitude in q and in p), two components per point, against the teacher's own map x_T = target.aa_map. The energy
+    loss is invariant under twists theta -> theta + g(J), so students can settle on teacher o twist, which is outside
+    their class; this loss makes the teacher itself the unique zero. The evaluator still reports the energy error.
     expose: optional dict; the residual, J^T u and normal-equation closures are put in it (for tests)."""
     from torch.func import functional_call, jacrev, vmap
     dev, dt = next(model.parameters()).device, next(model.parameters()).dtype
@@ -709,6 +791,36 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
             Jm = ((dom[:, None, None, :] * Ad + omd[:, None, None, None] * JA - JB) / sN).reshape(k * nS * 2, -1)
             return r.reshape(-1), Jm
 
+    if loss == "coord":
+        assert weight_fn is None and harmonic_weight is None and escale is not None
+        with torch.no_grad():
+            y_ref = target.aa_map(to_host64(aa_dev.reshape(-1, 2)))          # (N, 2), host float64
+        s_pt = coord_scale(escale, float(target.nu0)).repeat_interleave(nS, 0)  # (N, 2)
+
+        def resid(v):  # noqa: F811
+            with torch.no_grad():
+                y = to_host64(functional_call(model, unflat(v), (aa_dev.reshape(-1, 2),)))
+            return ((y - y_ref) / s_pt / sN).reshape(-1)
+
+        def jtv(v, u):  # noqa: F811
+            vv = v.detach().clone().requires_grad_(True)
+            y = functional_call(model, unflat(vv), (aa_dev.reshape(-1, 2),))
+            y = y.cpu().double() if (y.dtype != F64 or y.device != HOST) else y
+            r = ((y - y_ref) / s_pt / sN).reshape(-1)
+            return to_host64(torch.autograd.grad(r, vv, grad_outputs=u.to(r.dtype))[0])
+
+        def coord_chunk(v, x, o0, k):
+            """Residual (k nS 2,) and its Jacobian (k nS 2, P) for the tori o0 .. o0 + k."""
+            Jd = vmap(jacrev(f_point), in_dims=(None, 0))(unflat(v), x)
+            Jy = torch.cat([Jd[n].reshape(x.shape[0], 2, -1) for n in names], -1)  # (k nS, 2, P)
+            del Jd
+            with torch.no_grad():
+                y = to_host64(functional_call(model, unflat(v), (x,)))
+            sl = slice(o0 * nS, (o0 + k) * nS)
+            r = ((y - y_ref[sl]) / s_pt[sl] / sN).reshape(-1)
+            Jm = (Jy / to_dev(s_pt[sl])[..., None] / sN).reshape(k * nS * 2, -1)
+            return r, Jm
+
     sw = None  # sqrt of the per-point weights of the current step (host, flat), or None
 
     hw_n = None if harmonic_weight is None else \
@@ -735,8 +847,8 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
         for o0 in range(0, nO, chunk_orbits):
             sl = aa_dev[o0:o0 + chunk_orbits]; k = sl.shape[0]
             x = sl.reshape(-1, 2)
-            if loss == "invariance":
-                r, Jm = inv_chunk(v, x, o0, k)
+            if loss in ("invariance", "coord"):
+                r, Jm = (inv_chunk if loss == "invariance" else coord_chunk)(v, x, o0, k)
                 A += Jm.T @ Jm; g += Jm.T @ to_dev(r)
                 rs.append(r)
                 continue

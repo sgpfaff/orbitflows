@@ -120,7 +120,7 @@ def main(spec, out_root):
         if S["kind"] == "adam":
             save(si, 0, None)  # an interrupted Adam stage restarts from here
             C.train_adam(model, aa_dev, target, nO, nS, S["steps"], S.get("lr", 1e-3), record, S.get("every", 100),
-                         escale=escale)
+                         escale=escale, loss=cfg.get("loss", "energy"))
             stage_info.append(dict(stage=si, label=label, iters=S["steps"], why="done", wall=stage_wall()))
         else:
             lam0 = lam if (lam is not None and it_done > 0) else S.get("lam0", 1e-3)
@@ -130,7 +130,8 @@ def main(spec, out_root):
                                      record=record, ckpt=lambda it, l: save(si, it, l, stage_wall()), every=S.get("every", 25),
                                      wall_cap=wall, stall_window=S.get("stall_window"), stall_rtol=S.get("stall_rtol"),
                                      chunk_orbits=S.get("chunk_orbits", 16), it0=it_done, escale=escale,
-                                     geodesic=S.get("geodesic", False), retry_lam=S.get("retry_lam"))
+                                     geodesic=S.get("geodesic", False), retry_lam=S.get("retry_lam"),
+                                     loss=cfg.get("loss", "energy"))
             stage_info.append(dict(stage=si, label=label, iters=it_done + n, why=why, wall=stage_wall()))
         it_done, lam = 0, None
         save(si + 1, 0, None)
