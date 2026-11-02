@@ -66,6 +66,10 @@ Batches
              as the plain model), with the plain MW teachers' recipe (recipe's rec_fixed_std: fixed nu0, Adam 3000 then
              LM until the loss falls < 0.1% in 300 steps) on H100s, seeds 0-2. Compare with rec_fixed_std_s0-2
              (2.4e-5, 1.8e-5, 3.5e-5); the best seed becomes a rotated teacher for rotated students.
+  deep2g   : the three mwt16deep students (32 x 64 on the 16-layer teacher, stopped by the second bundle's 12 h limit at
+             5.1-9.6e-6 after 8.0-8.8k LM steps, still falling) continued on H100s with the cont4g LM recipe (lam 1e-11,
+             retry_lam 1e-11, geodesic, 1,000-step stall rule), on their own 128 angles; and seed 0 also on 512 angles,
+             because at 128 the 3-8.3 kpc tori already show 1.5-3x more error between the training angles than at them.
   cont4g   : the same 13 jobs on one H100 each (Trillium GPU cluster), LM in float64 on CUDA; results in cont4g_v2/.
   ladder   : (A) SHO with the exact toy: the answer is the identity, which the flow represents exactly;
              (B) SHO with a wrong toy frequency: the answer is a linear rescaling, which tanh shears reach
@@ -240,6 +244,14 @@ def main():
                        stall_rtol=1e-3, every=25, geodesic=False, chunk_orbits=96)]
     batches["rotmw"] = [job(f"rot_fixed_std_s{s}", "rotmw", p, model=dict(rotate="golden"), toy=dict(mode="fixed", omega="nu0", n_cheb=6),
                             seed=s, stages=rot_stages) for s in range(3)]
+
+    # ---- experiment 2: does depth remove the optimisation floor? the 32-layer students continued to convergence ----
+    def cont_deep(j, n_steps=None):
+        lm = dict(j["stages"][-1], device="cuda", wall_hours=7.5, lam0=1e-11, retry_lam=1e-11, chunk_orbits=96)
+        extra = dict(name=j["name"] + f"_a{n_steps}", data=dict(j["data"], n_steps=n_steps)) if n_steps else {}
+        return dict(j, batch="deep2g_v2", init={"from": f"{j['batch']}/{j['name']}", "stage": len(j["stages"]) - 1},
+                    stages=j["stages"][:-1] + [lm], **extra)
+    batches["deep2g"] = [cont_deep(j) for j in batches["mwt16deep"]] + [cont_deep(batches["mwt16deep"][0], 512)]
 
     for b, jobs in batches.items():
         path = os.path.join(HERE, "jobs", f"{b}_{p}.jsonl")
