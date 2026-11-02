@@ -640,7 +640,7 @@ def train_adam(model, aa_dev, target, nO, nS, steps, lr, record, every=100, esca
 def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ckpt=None, every=25,
              wall_cap=None, stall_window=None, stall_rtol=None, chunk_orbits=16, it0=0, escale=None,
              geodesic=False, geo_h=0.1, geo_alpha=0.75, weight_fn=None, objective=None, damp_floor=1e-12,
-             retry_lam=None, damping="marquardt", harmonic_weight=None, loss="energy", expose=None):
+             retry_lam=None, damping="marquardt", harmonic_weight=None, loss="energy", expose=None, coord_ref=None):
     """Levenberg-Marquardt on r_i / sqrt(N). Per-point Jacobians of the model outputs (vmap of jacrev) on
     the model's device/dtype, chained analytically through H (float64, host) and the per-torus mean;
     J^T J and J^T r are accumulated over chunks of tori (memory O(chunk * P + P^2)) and solved in float64.
@@ -688,6 +688,8 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     amplitude in q and in p), two components per point, against the teacher's own map x_T = target.aa_map. The energy
     loss is invariant under twists theta -> theta + g(J), so students can settle on teacher o twist, which is outside
     their class; this loss makes the teacher itself the unique zero. The evaluator still reports the energy error.
+    coord_ref: (N, 2) host float64 target coordinates for loss="coord" in place of the teacher's map (e.g. the teacher
+    in a partly removed twist gauge, for untwisting a student in stages).
     expose: optional dict; the residual, J^T u and normal-equation closures are put in it (for tests)."""
     from torch.func import functional_call, jacrev, vmap
     dev, dt = next(model.parameters()).device, next(model.parameters()).dtype
@@ -794,7 +796,7 @@ def train_lm(model, aa_dev, target, nO, nS, max_iters, lam=1e-3, record=None, ck
     if loss == "coord":
         assert weight_fn is None and harmonic_weight is None and escale is not None
         with torch.no_grad():
-            y_ref = target.aa_map(to_host64(aa_dev.reshape(-1, 2)))          # (N, 2), host float64
+            y_ref = target.aa_map(to_host64(aa_dev.reshape(-1, 2))) if coord_ref is None else coord_ref.to(F64)  # (N, 2), host
         s_pt = coord_scale(escale, float(target.nu0)).repeat_interleave(nS, 0)  # (N, 2)
 
         def resid(v):  # noqa: F811

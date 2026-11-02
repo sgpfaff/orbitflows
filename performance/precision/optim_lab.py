@@ -6,6 +6,7 @@ bed for changes to the optimiser.
 
     python optim_lab.py damping  STUDENT_JOB_DIR [--iters 400] [--variants marquardt,levenberg,sqrt,tensor,floor6]
     python optim_lab.py homotopy STUDENT_JOB_DIR [--stages 20] [--stage-iters 150] [--final-iters 3000] [--seed 0]
+    python optim_lab.py untwist  STUDENT_JOB_DIR [--stages 10] [--stage-iters 100] [--final-iters 3000]
     common options: --n-steps N trains on N angles per torus instead of the job's (the teacher students used 128;
     production runs use 512), --wall SECONDS caps each damping variant's run, --save PATH keeps the last variant's state.
 
@@ -20,6 +21,11 @@ homotopy: a fresh student (same architecture and seed rule), no Adam, trained by
   (and its damping). At s = 0 the target is the toy itself, so the answer is the identity, near which the flow starts.
   The last stage (s = 1) runs on. The held-out error against the teacher is logged after every stage and every 50 steps
   of the last one, with the cumulative LM step count, to compare with the students' learning curves.
+untwist: the energy loss is invariant under twists theta -> theta + g(J), and stalled students sit at teacher o twist_g,
+  outside their class. Measure the student's twist g_i on each training torus (angle of T^-1 o S in the teacher's toy
+  coordinates), then run LM on the coordinate loss against the teacher in the gauge (1 - s) g, s = 1/K .. 1 (K stages of
+  --stage-iters), which removes the twist gradually, then --final-coord-iters more on the teacher itself, and finally LM on
+  the energy loss (--final-iters, the rest of --wall). Logs the held-out energy error and the twist range after every stage.
 Writes OUT (default optim_lab_<mode>.json next to this file).
 """
 import argparse
@@ -164,13 +170,81 @@ def homotopy(a):
                   open(a.out, "w"), indent=1)
 
 
+def twist_of(m, t, aa, nO, nS):
+    """Twist g_i (nO,) of the student relative to the teacher on the training tori, and the spread of the angle shift."""
+    import math
+    with torch.no_grad():
+        A = aa.reshape(-1, 2).cpu().double()
+        X = t.T.inverse(m(aa.reshape(-1, 2)).cpu().double()); q, p = X[:, 0], X[:, 1]; w = t.omega
+        d = torch.remainder(torch.atan2(-p / math.sqrt(w), q * math.sqrt(w)) - A[:, 0] + math.pi, 2 * math.pi) - math.pi
+        d = d.view(nO, nS)
+        g = torch.atan2(torch.sin(d).mean(1), torch.cos(d).mean(1))
+        spread = float((torch.remainder(d - g[:, None] + math.pi, 2 * math.pi) - math.pi).abs().max())
+    return g, spread
+
+
+def untwist(a):
+    cfg, t, aa, nO, nS, es, ev, build = setup(a.job, a.device, a.n_steps)
+    st = torch.load(os.path.join(a.job, "state.pt"), weights_only=False)
+    m = build(cfg.get("seed", 0)); m.load_state_dict({k: v_.to(a.device) for k, v_ in st["state"].items()})
+    A = aa.reshape(-1, 2).cpu().double()
+    g0, spread = twist_of(m, t, aa, nO, nS)
+    q = ev.quick(m); t0 = time.perf_counter(); tot = 0
+    log = [dict(stage=0, s=0.0, it=0, eval_mean=q["eval_mean"], twist_min=float(g0.min()), twist_max=float(g0.max()), spread=spread, t=0.0)]
+    print(f"start: held-out {q['eval_mean']:.3e}; twist {float(g0.min()):+.4f} .. {float(g0.max()):+.4f} rad", flush=True)
+    curve = []
+
+    def rec(it, loss, lam):
+        q_ = ev.quick(m); curve.append((tot + it, q_["eval_mean"], loss, lam))
+
+    # the untwisting stages and the coordinate stage share at most half of --wall; the energy stage gets the rest
+    half_left = lambda: None if a.wall is None else max(0.5 * a.wall - (time.perf_counter() - t0), 30.0)
+    lam = 1e-6
+    for k in range(1, a.stages + 1):
+        s = k / a.stages
+        th = A[:, 0] + (1 - s) * g0.repeat_interleave(nS)
+        y_ref = t.aa_map(torch.stack([th, A[:, 1]], -1))
+        n, why, lam = C.train_lm(m, aa, t, nO, nS, max_iters=a.stage_iters, lam=lam, record=rec, every=25, escale=es, geodesic=True,
+                                 retry_lam=1e-11, chunk_orbits=a.chunk, loss="coord", coord_ref=y_ref, wall_cap=half_left())
+        tot += n
+        g, spread = twist_of(m, t, aa, nO, nS); q = ev.quick(m)
+        log.append(dict(stage=k, s=s, it=tot, why=why, eval_mean=q["eval_mean"], twist_min=float(g.min()), twist_max=float(g.max()),
+                        spread=spread, lam=lam, t=time.perf_counter() - t0))
+        print(f"stage {k:2d} s={s:.2f}: {n} its ({why}); held-out {q['eval_mean']:.3e}; twist {float(g.min()):+.4f} .. {float(g.max()):+.4f} rad; "
+              f"lam {lam:.0e}; {(time.perf_counter() - t0) / 60:.1f} min", flush=True)
+        json.dump(dict(mode="untwist", job=a.job, n_steps=nS, log=log, curve=curve), open(a.out, "w"), indent=1)
+    if a.final_coord_iters:  # converge on the teacher itself (gauge pinned) before handing back to the energy loss
+        n, why, lam = C.train_lm(m, aa, t, nO, nS, max_iters=a.final_coord_iters, lam=lam, record=rec, every=25, escale=es,
+                                 geodesic=True, retry_lam=1e-11, chunk_orbits=a.chunk, loss="coord", wall_cap=half_left())
+        tot += n
+        g, spread = twist_of(m, t, aa, nO, nS); q = ev.quick(m)
+        log.append(dict(stage="coord-final", it=tot, why=why, eval_mean=q["eval_mean"], twist_min=float(g.min()), twist_max=float(g.max()),
+                        spread=spread, lam=lam, t=time.perf_counter() - t0))
+        print(f"coordinate LM on the teacher: {n} its ({why}); held-out {q['eval_mean']:.3e}; twist {float(g.min()):+.2e} .. "
+              f"{float(g.max()):+.2e} rad; {(time.perf_counter() - t0) / 60:.1f} min", flush=True)
+        json.dump(dict(mode="untwist", job=a.job, n_steps=nS, log=log, curve=curve), open(a.out, "w"), indent=1)
+    left = None if a.wall is None else max(a.wall - (time.perf_counter() - t0), 60.0)
+    n, why, lam = C.train_lm(m, aa, t, nO, nS, max_iters=a.final_iters, lam=1e-11, record=rec, every=25, escale=es, geodesic=True,
+                             retry_lam=1e-11, chunk_orbits=a.chunk, wall_cap=left)
+    tot += n
+    g, spread = twist_of(m, t, aa, nO, nS); q = ev.quick(m)
+    log.append(dict(stage="energy", it=tot, why=why, eval_mean=q["eval_mean"], eval_max=q["eval_max"], train_mean=q["train_mean"],
+                    twist_min=float(g.min()), twist_max=float(g.max()), spread=spread, lam=lam, t=time.perf_counter() - t0))
+    print(f"energy LM: {n} its ({why}); held-out {q['eval_mean']:.3e} (max {q['eval_max']:.2e}); twist {float(g.min()):+.2e} .. "
+          f"{float(g.max()):+.2e} rad; {(time.perf_counter() - t0) / 60:.1f} min", flush=True)
+    json.dump(dict(mode="untwist", job=a.job, n_steps=nS, log=log, curve=curve), open(a.out, "w"), indent=1)
+    if a.save:
+        torch.save(dict(state={k_: x.detach().cpu() for k_, x in m.state_dict().items()}, lam=lam, it=tot, n_steps=nS), a.save)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["damping", "homotopy"]); ap.add_argument("job")
+    ap.add_argument("mode", choices=["damping", "homotopy", "untwist"]); ap.add_argument("job")
     ap.add_argument("--iters", type=int, default=400); ap.add_argument("--variants", default="marquardt,levenberg,sqrt,tensor,floor6")
     ap.add_argument("--lam0", type=float, default=1e-11)
-    ap.add_argument("--stages", type=int, default=20); ap.add_argument("--stage-iters", type=int, default=150)
+    ap.add_argument("--stages", type=int, default=20); ap.add_argument("--stage-iters", type=int, default=150)  # untwist: use 10 / 100
     ap.add_argument("--final-iters", type=int, default=3000); ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--final-coord-iters", type=int, default=0, help="untwist: coordinate LM on the teacher before the energy stage")
     ap.add_argument("--damping", default="marquardt"); ap.add_argument("--out", default=None)
     ap.add_argument("--n-steps", type=int, default=None, help="angles per training torus (default: the job's)")
     ap.add_argument("--wall", type=float, default=None, help="wall-clock cap per damping variant, seconds")
@@ -178,7 +252,7 @@ def main():
     ap.add_argument("--device", default="cpu"); ap.add_argument("--chunk", type=int, default=16, help="tori per Jacobian chunk")
     a = ap.parse_args()
     a.out = a.out or os.path.join(HERE, f"optim_lab_{a.mode}.json")
-    (damping if a.mode == "damping" else homotopy)(a)
+    {"damping": damping, "homotopy": homotopy, "untwist": untwist}[a.mode](a)
 
 
 if __name__ == "__main__":
