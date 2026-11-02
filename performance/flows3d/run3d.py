@@ -109,7 +109,7 @@ def main(cfg, out_root):
             n, why, lam = C.train_lm_inv(m, aa, t, esc, isc, L["invariance_beta"], L["max_iters"] - n_done, lam=lam0,
                                          record=lambda k, l, lam: record("lm", k, l, lam), every=L.get("every", 10), wall_cap=wall,
                                          chunk=L.get("chunk", 4), inv_angles=L.get("inv_angles"), ckpt=save,
-                                         ckpt_every=L.get("ckpt_every", 10), it0=n_done)
+                                         ckpt_every=L.get("ckpt_every", 10), it0=n_done, geodesic=L.get("geodesic", False))
         else:
             n, why, lam = C.train_lm(m, aa, t, esc, L["max_iters"] - n_done, lam=lam0, geodesic=L.get("geodesic", True),
                                      record=lambda k, l, lam: record("lm", n_done + k, l, lam), every=L.get("every", 10), wall_cap=wall,

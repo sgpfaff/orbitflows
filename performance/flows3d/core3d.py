@@ -492,18 +492,30 @@ def lm_residual_system(model, aa, target, escale, iscale=None, beta=0.0, chunk=4
         R = X - torch.einsum("tsai,ti->tsa", Zt, Om)
         return X, Zt, G, Om, R
 
+    def resid_chunk(pd, o0):
+        """Residual rows of the tori o0 .. o0+chunk ([energy rows, invariance rows]); differentiable in pd."""
+        sl = aa[o0:o0 + chunk]; k = sl.shape[0]
+        H = target.H(functional_call(model, pd, (sl.reshape(-1, 6),))).view(k, nS)
+        rE = ((H - H.mean(1, keepdim=True)) / escale[o0:o0 + k] / sNE).reshape(-1)
+        if not beta:
+            return rE
+        y = vmap(y_point, in_dims=(None, 0))(pd, sl[:, :nI].reshape(-1, 6))
+        *_, R = inv_parts(y[:, :6], y[:, 6:].reshape(-1, 6, 3), k, o0)
+        return torch.cat([rE, (sb * R / iscale[o0:o0 + k] / sNI).reshape(-1)])
+
     def resid(v):
-        pd = unflat(v); out = []
+        pd = unflat(v)
         with torch.no_grad():
-            for o0 in range(0, nO, chunk):
-                sl = aa[o0:o0 + chunk]; k = sl.shape[0]
-                H = target.H(functional_call(model, pd, (sl.reshape(-1, 6),))).view(k, nS)
-                out.append(((H - H.mean(1, keepdim=True)) / escale[o0:o0 + k] / sNE).reshape(-1))
-                if beta:
-                    y = vmap(y_point, in_dims=(None, 0))(pd, sl[:, :nI].reshape(-1, 6))
-                    *_, R = inv_parts(y[:, :6], y[:, 6:].reshape(-1, 6, 3), k, o0)
-                    out.append((sb * R / iscale[o0:o0 + k] / sNI).reshape(-1))
-        return torch.cat(out)
+            return torch.cat([resid_chunk(pd, o0) for o0 in range(0, nO, chunk)])
+
+    def jtv(v, u):
+        """J^T u for the residual vector's Jacobian at v, chunk by chunk (reverse mode, torch.func.vjp)."""
+        pd = unflat(v); out = torch.zeros_like(v); i0 = 0
+        for o0 in range(0, nO, chunk):
+            r_c, vjp_fn = torch.func.vjp(lambda p: resid_chunk(p, o0), pd)
+            g = vjp_fn(u[i0:i0 + r_c.numel()])[0]; i0 += r_c.numel()
+            out += torch.cat([g[n].reshape(-1) for n in names])
+        return out
 
     def normal_eqs(v):
         P = v.numel(); A = torch.zeros(P, P, dtype=F64); g = torch.zeros(P, dtype=F64); rs = []
@@ -544,12 +556,14 @@ def lm_residual_system(model, aa, target, escale, iscale=None, beta=0.0, chunk=4
             A += JI.T @ JI; g += JI.T @ rI; rs.append(rI)
         return torch.cat(rs), g, A
 
+    resid.jtv = jtv  # used by geodesic acceleration
     return unflat, resid, normal_eqs
 
 
 def train_lm_inv(model, aa, target, escale, iscale, beta, max_iters, lam=1e-3, record=None, every=10, chunk=4, wall_cap=None,
-                 inv_angles=None, ckpt=None, ckpt_every=10, it0=0):
-    """Plain Levenberg-Marquardt (Marquardt scaling) on the combined energy + beta * invariance residuals.
+                 inv_angles=None, ckpt=None, ckpt_every=10, it0=0, geodesic=False, geo_h=0.1, geo_alpha=0.75):
+    """Levenberg-Marquardt (Marquardt scaling) on the combined energy + beta * invariance residuals, optionally with
+    geodesic acceleration (as in train_lm: the corrected step d + a/2 first, the plain step as fallback).
     ckpt(it_done, lam) is called every ckpt_every steps and at the end; it0 offsets the step count on resume."""
     unflat, resid, normal_eqs = lm_residual_system(model, aa, target, escale, iscale, beta, chunk, inv_angles)
     v = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
@@ -562,9 +576,19 @@ def train_lm_inv(model, aa, target, escale, iscale, beta, max_iters, lam=1e-3, r
             if int(info) != 0:
                 lam *= 10; continue
             d = -torch.cholesky_solve(g[:, None], L)[:, 0]
-            fn = 0.5 * float(resid(v + d).pow(2).sum())
-            if math.isfinite(fn) and fn < f:
-                v, f, accepted = v + d, fn, True; lam = max(lam / 3, 1e-15); break
+            trials = [d]
+            if geodesic:
+                Jt_rdd = (2 / geo_h) * ((resid.jtv(v, resid(v + geo_h * d)) - g) / geo_h - A @ d)
+                a = -torch.cholesky_solve(Jt_rdd[:, None], L)[:, 0]
+                if 2 * float((dg * a * a).sum().sqrt()) <= geo_alpha * float((dg * d * d).sum().sqrt()):
+                    trials = [d + 0.5 * a, d]
+            for dd in trials:
+                fn = 0.5 * float(resid(v + dd).pow(2).sum())
+                if math.isfinite(fn) and fn < f:
+                    v, f, accepted = v + dd, fn, True
+                    break
+            if accepted:
+                lam = max(lam / 3, 1e-15); break
             lam *= 4
         with torch.no_grad():
             i = 0
