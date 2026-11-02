@@ -15,6 +15,8 @@ Config keys:
           (core3d.train_lm_inv), "inv_angles" angles per torus for the invariance rows, checkpoints every "ckpt_every"
   init_from   a .pt file (path relative to this directory) or the name of an earlier run in the results folder:
               its matching layers are loaded (warm start / grow a model)
+  device  "cpu" (default), "cuda" or "auto" (CUDA if present); float64 throughout. Checkpoints are saved as CPU
+          tensors, so CPU and GPU runs can warm-start each other.
   seed, threads
 """
 import os
@@ -29,6 +31,10 @@ import torch
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import core3d as C  # noqa: E402
+
+
+def cpu_state(m):
+    return {k: v.detach().cpu() for k, v in m.state_dict().items()}
 
 
 def atomic_save(obj, path):
@@ -53,7 +59,8 @@ def main(cfg, out_root):
     if os.path.exists(os.path.join(jdir, "DONE")):
         print("already done:", cfg["name"]); return
     json.dump(cfg, open(os.path.join(jdir, "config.json"), "w"), indent=1)
-    t = C.make_target(cfg["target"]); d = cfg["data"]
+    dev = C.resolve_device(cfg.get("device", "cpu"))
+    t_cpu = C.make_target(cfg["target"]); t = C.target_on(t_cpu, dev); d = cfg["data"]
     spherical = d.get("kind", "cartesian") == "spherical"
     if spherical:  # tori labelled by (J_r, L, cos i)
         sg = lambda mid: C.spherical_action_grid(d["n_per_axis"], d["Jr"][0], d["Jr"][1], d["L"][0], d["L"][1], d.get("cosi_max", 0.9), mid)
@@ -64,22 +71,23 @@ def main(cfg, out_root):
         Jt, J_eval = C.action_grid(d["n_per_axis"], d["J_lo"], d["J_hi"]), C.action_grid(d["n_per_axis"], d["J_lo"], d["J_hi"], midpoints=True)
         if d.get("tori") == "sobol":  # scattered training tori; the held-out grid stays the same
             Jt = C.sobol_actions(d["n_tori"], d["J_lo"], d["J_hi"], seed=1 + cfg.get("seed", 0))
-    aa = C.aa_points(Jt, C.angle_samples(d["n_angles"], cfg.get("seed", 0)))
-    m = C.build_model(cfg["model"], cfg["toy"], seed=cfg.get("seed", 0))
+    Jt = Jt.to(dev)
+    aa = C.aa_points(Jt, C.angle_samples(d["n_angles"], cfg.get("seed", 0)).to(dev))
+    m = C.build_model(cfg["model"], cfg["toy"], seed=cfg.get("seed", 0), device=dev)
     st_path = os.path.join(jdir, "state.pt")
-    st = torch.load(st_path, weights_only=False) if os.path.exists(st_path) else None
+    st = torch.load(st_path, weights_only=False, map_location=dev) if os.path.exists(st_path) else None
     if st:
         m.load_state_dict(st["state"])
         print(f"resuming {cfg['name']} at {st['stage']} step {st['it']} ({st['t'] / 3600:.2f} h so far)", flush=True)
     elif cfg.get("init_from"):  # warm start: every matching layer of an earlier model
         src_path = cfg["init_from"]
         src_path = os.path.join(HERE, src_path) if src_path.endswith(".pt") else os.path.join(out_root, src_path, "model.pt")
-        src = torch.load(src_path, weights_only=False)["state"]
+        src = torch.load(src_path, weights_only=False, map_location=dev)["state"]
         own = m.state_dict(); keep = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
         m.load_state_dict(keep, strict=False)
         print(f"initialised {len(keep)}/{len(own)} tensors from {cfg['init_from']}", flush=True)
     esc = m.toy.energy(Jt).reshape(-1, 1)
-    ev = C.Evaluator(t, J=J_eval, n_angles=d.get("n_eval_angles", 1024))
+    ev = C.Evaluator(t_cpu, J=J_eval, n_angles=d.get("n_eval_angles", 1024), device=dev)
     t_off = st["t"] if st else 0.0
     logf = open(os.path.join(jdir, "log.jsonl"), "a"); t0 = time.perf_counter()
     elapsed = lambda: t_off + time.perf_counter() - t0
@@ -87,12 +95,13 @@ def main(cfg, out_root):
     def record(stage, it, loss, lam=None):
         rec = dict(stage=stage, it=it, loss=loss, lam=lam, t=round(elapsed(), 2), **ev.quick(m))
         if spherical:
-            rec.update(spherical_diagnostics(m, t, ev.J, ev.th))
+            rec.update(spherical_diagnostics(m, ev.target, ev.J, ev.th))
         logf.write(json.dumps(rec) + "\n"); logf.flush()
         extra = f" |L|-wander={rec['L_wander_median']:.2e} inv={rec['invariance_rms']:.2e}" if spherical else ""
         print(f"[{cfg['name']}] {stage} it={it} loss={loss:.3e} held-out={rec['eval_mean']:.3e} max={rec['eval_max']:.3e}{extra} t={rec['t'] / 3600:.2f}h", flush=True)
 
-    print(f"{cfg['name']}: {C.n_params(m)} parameters, {aa.shape[0]} tori x {aa.shape[1]} angles", flush=True)
+    print(f"{cfg['name']}: {C.n_params(m)} parameters, {aa.shape[0]} tori x {aa.shape[1]} angles, on {dev}"
+          f"{' (' + torch.cuda.get_device_name(dev) + ')' if dev.type == 'cuda' else ''}", flush=True)
     A = cfg.get("adam", {})
     if not st:
         record("init", 0, float(C.residuals(m, aa, t, esc).pow(2).mean()))
@@ -100,7 +109,7 @@ def main(cfg, out_root):
             C.train_adam(m, aa, t, A["steps"], A.get("lr", 1e-3), esc, record=lambda k, l: record("adam", k, l), every=A.get("every", 100))
     L = cfg.get("lm", {})
     why, n_done = None, (st["it"] if st else 0)
-    save = lambda it, lam: atomic_save(dict(state=m.state_dict(), stage="lm", it=it, lam=lam, t=elapsed()), st_path)
+    save = lambda it, lam: atomic_save(dict(state=cpu_state(m), stage="lm", it=it, lam=lam, t=elapsed()), st_path)
     if L.get("max_iters", 0) and n_done < L["max_iters"]:
         wall = L.get("wall_hours"); wall = max(wall * 3600 - t_off, 1.0) if wall else None
         lam0 = st["lam"] if st and st.get("lam") else L.get("lam0", 1e-3)
@@ -115,10 +124,10 @@ def main(cfg, out_root):
                                      record=lambda k, l, lam: record("lm", n_done + k, l, lam), every=L.get("every", 10), wall_cap=wall,
                                      chunk=L.get("chunk", 8))
             save(n_done + n, lam)
-    torch.save(dict(state=m.state_dict(), config=cfg), os.path.join(jdir, "model.pt"))
+    torch.save(dict(state=cpu_state(m), config=cfg), os.path.join(jdir, "model.pt"))
     res = dict(config=cfg, n_params=C.n_params(m), lm_stop=why, wall_s=elapsed(), final=ev.quick(m), action_freq=ev.action_freq(m))
     if spherical:
-        res["final"].update(spherical_diagnostics(m, t, ev.J, ev.th))
+        res["final"].update(spherical_diagnostics(m, ev.target, ev.J, ev.th))
     json.dump(res, open(os.path.join(jdir, "result.json"), "w"))
     open(os.path.join(jdir, "DONE"), "w").write(time.strftime("%Y-%m-%d %H:%M:%S"))
     f = res["final"]

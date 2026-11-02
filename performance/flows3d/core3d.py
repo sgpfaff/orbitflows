@@ -150,6 +150,25 @@ class Isochrone:
         return torch.stack([Or, OL, torch.zeros_like(Or)], -1)
 
 
+def target_on(target, device):
+    """A shallow copy of a target whose tensors (frequencies, quartic coefficients) live on `device`; H and pot
+    then run there. Exact ground truth (E_of_J, freqs) should be evaluated on the original CPU target."""
+    import copy
+    t = copy.copy(target)
+    for k, val in vars(target).items():
+        if torch.is_tensor(val):
+            setattr(t, k, val.to(device))
+    return t
+
+
+def resolve_device(name):
+    if name in (None, "cpu"):
+        return torch.device("cpu")
+    if name == "auto":  # float64 work: CUDA if present, never Apple MPS (no float64)
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(name)
+
+
 def make_target(spec):
     kind = spec["kind"]
     if kind == "aniso_ho":
@@ -309,13 +328,14 @@ class AAMap3D(torch.nn.Module):
         return self.flow(self.toy(aa))
 
 
-def build_model(mcfg, toy, seed=0):
-    """toy: a list of three frequencies (Cartesian oscillator) or {"kind": "spherical_ho", "omega": w}."""
+def build_model(mcfg, toy, seed=0, device="cpu"):
+    """toy: a list of three frequencies (Cartesian oscillator) or {"kind": "spherical_ho", "omega": w}. Parameters are
+    initialised on the CPU (same values on every device), then moved."""
     torch.manual_seed(seed)
     flow = Flow6(mcfg.get("n_lin", 2), mcfg.get("n_blocks", 8), mcfg.get("width", 32), mcfg.get("gate_std", 1e-3), seed)
     if isinstance(toy, dict) and toy.get("kind") == "spherical_ho":
-        return AAMap3D(SphericalToyHO(toy["omega"]), flow)
-    return AAMap3D(Toy3D(toy["omegas"] if isinstance(toy, dict) else toy), flow)
+        return AAMap3D(SphericalToyHO(toy["omega"]), flow).to(device)
+    return AAMap3D(Toy3D(toy["omegas"] if isinstance(toy, dict) else toy), flow).to(device)
 
 
 def n_params(m):
@@ -410,14 +430,18 @@ def invariance_scale(model, aa):
 
 
 class Evaluator:
-    def __init__(self, target, J_lo=None, J_hi=None, n_train_per_axis=None, n_angles=1024, seed=12345, J=None):
-        self.target = target
+    def __init__(self, target, J_lo=None, J_hi=None, n_train_per_axis=None, n_angles=1024, seed=12345, J=None, device="cpu"):
+        device = torch.device(device)
+        self.target_cpu = target                     # exact ground truth is computed here, on the CPU
+        self.target = target_on(target, device)      # H on the evaluation device
         # held-out tori: between the training ones (or given)
-        self.J = J if J is not None else action_grid(n_train_per_axis, J_lo, J_hi, midpoints=True)
-        self.th = angle_samples(n_angles, seed)                     # held-out angles: an independent sequence
-        self.aa = aa_points(self.J, self.th)
-        self.E_true = target.E_of_J(self.J).reshape(-1, 1)
+        J = J if J is not None else action_grid(n_train_per_axis, J_lo, J_hi, midpoints=True)
+        J = J.cpu()
+        self.E_true = target.E_of_J(J).reshape(-1, 1).to(device)
         self.E_rel = self.E_true - target.E0  # energy above the potential minimum
+        self.J = J.to(device)
+        self.th = angle_samples(n_angles, seed).to(device)          # held-out angles: an independent sequence
+        self.aa = aa_points(self.J, self.th)
 
     @torch.no_grad()
     def quick(self, model):
@@ -426,7 +450,7 @@ class Evaluator:
         return dict(eval_mean=float(e.mean()), eval_max=float(e.max()),
                     eval_mean_trueE=float(((H - H.mean(1, keepdim=True)) / self.E_rel).abs().mean()),
                     energy_offset_max=float(((H.mean(1, keepdim=True) - self.E_true) / self.E_rel).abs().max()),
-                    origin_image_norm=float(model.flow(torch.zeros(1, 6, dtype=F64)).norm()))
+                    origin_image_norm=float(model.flow(torch.zeros(1, 6, dtype=F64, device=self.aa.device)).norm()))
 
     def action_freq(self, model, n=40):
         """Torus-mean energy against the exact H(J) (the image torus has actions J exactly) and model
@@ -434,7 +458,7 @@ class Evaluator:
         J = self.J[:: max(1, len(self.J) // n)].clone().requires_grad_(True)
         Hm = self.target.H(model(aa_points(J, self.th).reshape(-1, 6))).view(J.shape[0], -1).mean(-1)
         dHdJ = torch.autograd.grad(Hm.sum(), J)[0]
-        Et = self.target.E_of_J(J.detach()); Om = self.target.freqs(J.detach())
+        Et = self.target_cpu.E_of_J(J.detach().cpu()).to(J.device); Om = self.target_cpu.freqs(J.detach().cpu()).to(J.device)
         scale = Om.abs().max(-1, keepdim=True).values  # some frequencies are zero (L_z in a spherical potential)
         return dict(rel_E_err=((Hm.detach() - Et) / (Et - self.target.E0)).abs().tolist(),
                     rel_freq_err=((dHdJ - Om).abs() / scale).max(-1).values.tolist())
@@ -466,7 +490,8 @@ def lm_residual_system(model, aa, target, escale, iscale=None, beta=0.0, chunk=4
     sizes = [p.numel() for _, p in model.named_parameters()]
     nO, nS = aa.shape[:2]; nI = nS if inv_angles is None else min(inv_angles, nS)
     sNE, sNI = math.sqrt(nO * nS), math.sqrt(nO * nI); sb = math.sqrt(beta)
-    E3 = torch.eye(3, dtype=F64)
+    dev = aa.device
+    E3 = torch.eye(3, dtype=F64, device=dev)
 
     def unflat(v):
         out, i = {}, 0
@@ -479,7 +504,7 @@ def lm_residual_system(model, aa, target, escale, iscale=None, beta=0.0, chunk=4
 
     def y_point(p, x):  # z and dz/dtheta for one point
         f = lambda xx: functional_call(model, p, (xx[None],))[0]
-        Z = torch.stack([jvp(f, (x,), (torch.cat([E3[i], torch.zeros(3, dtype=F64)]),))[1] for i in range(3)], -1)
+        Z = torch.stack([jvp(f, (x,), (torch.cat([E3[i], torch.zeros(3, dtype=F64, device=dev)]),))[1] for i in range(3)], -1)
         return torch.cat([f(x), Z.reshape(-1)])
 
     def pot_grad(x3):
@@ -518,7 +543,7 @@ def lm_residual_system(model, aa, target, escale, iscale=None, beta=0.0, chunk=4
         return out
 
     def normal_eqs(v):
-        P = v.numel(); A = torch.zeros(P, P, dtype=F64); g = torch.zeros(P, dtype=F64); rs = []
+        P = v.numel(); A = torch.zeros(P, P, dtype=F64, device=v.device); g = torch.zeros(P, dtype=F64, device=v.device); rs = []
         pd = unflat(v)
         for o0 in range(0, nO, chunk):
             sl = aa[o0:o0 + chunk]; k = sl.shape[0]
@@ -635,7 +660,7 @@ def train_lm(model, aa, target, escale, max_iters, lam=1e-3, record=None, every=
     f_point = lambda p, x: functional_call(model, p, (x[None],))[0]
 
     def normal_eqs(v):
-        P = v.numel(); A = torch.zeros(P, P, dtype=F64); g = torch.zeros(P, dtype=F64); rs = []
+        P = v.numel(); A = torch.zeros(P, P, dtype=F64, device=v.device); g = torch.zeros(P, dtype=F64, device=v.device); rs = []
         pd = unflat(v)
         for o0 in range(0, nO, chunk):
             x = aa[o0:o0 + chunk].reshape(-1, 6); k = x.shape[0] // nS
