@@ -12,7 +12,8 @@ Config keys:
   adam    {"steps": 300, "lr": 1e-3}
   lm      {"max_iters": 300, "geodesic": true, "wall_hours": 1.0, "every": 10}
           with "invariance_beta": b (0 included), the run uses plain LM on energy + b * invariance residuals
-          (core3d.train_lm_inv), "inv_angles" angles per torus for the invariance rows, checkpoints every "ckpt_every"
+          (core3d.train_lm_inv), "inv_angles" angles per torus for the invariance rows, checkpoints every "ckpt_every",
+          and "plateau": [n, rtol] stops it once the loss has fallen by less than a fraction rtol over n steps
   init_from   a .pt file (path relative to this directory) or the name of an earlier run in the results folder:
               its matching layers are loaded (warm start / grow a model)
   device  "cpu" (default), "cuda" or "auto" (CUDA if present); float64 throughout. Checkpoints are saved as CPU
@@ -118,7 +119,8 @@ def main(cfg, out_root):
             n, why, lam = C.train_lm_inv(m, aa, t, esc, isc, L["invariance_beta"], L["max_iters"] - n_done, lam=lam0,
                                          record=lambda k, l, lam: record("lm", k, l, lam), every=L.get("every", 10), wall_cap=wall,
                                          chunk=L.get("chunk", 4), inv_angles=L.get("inv_angles"), ckpt=save,
-                                         ckpt_every=L.get("ckpt_every", 10), it0=n_done, geodesic=L.get("geodesic", False))
+                                         ckpt_every=L.get("ckpt_every", 10), it0=n_done, geodesic=L.get("geodesic", False),
+                                         plateau=L.get("plateau"))
         else:
             n, why, lam = C.train_lm(m, aa, t, esc, L["max_iters"] - n_done, lam=lam0, geodesic=L.get("geodesic", True),
                                      record=lambda k, l, lam: record("lm", n_done + k, l, lam), every=L.get("every", 10), wall_cap=wall,

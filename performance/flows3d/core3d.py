@@ -586,13 +586,14 @@ def lm_residual_system(model, aa, target, escale, iscale=None, beta=0.0, chunk=4
 
 
 def train_lm_inv(model, aa, target, escale, iscale, beta, max_iters, lam=1e-3, record=None, every=10, chunk=4, wall_cap=None,
-                 inv_angles=None, ckpt=None, ckpt_every=10, it0=0, geodesic=False, geo_h=0.1, geo_alpha=0.75):
+                 inv_angles=None, ckpt=None, ckpt_every=10, it0=0, geodesic=False, geo_h=0.1, geo_alpha=0.75, plateau=None):
     """Levenberg-Marquardt (Marquardt scaling) on the combined energy + beta * invariance residuals, optionally with
     geodesic acceleration (as in train_lm: the corrected step d + a/2 first, the plain step as fallback).
-    ckpt(it_done, lam) is called every ckpt_every steps and at the end; it0 offsets the step count on resume."""
+    ckpt(it_done, lam) is called every ckpt_every steps and at the end; it0 offsets the step count on resume.
+    plateau = (n, rtol) stops once the loss has fallen by less than a fraction rtol over the last n steps."""
     unflat, resid, normal_eqs = lm_residual_system(model, aa, target, escale, iscale, beta, chunk, inv_angles)
     v = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
-    t0 = time.perf_counter(); why = "max_iters"; k = -1
+    t0 = time.perf_counter(); why = "max_iters"; k = -1; hist = []
     for k in range(max_iters):
         r, g, A = normal_eqs(v); f = 0.5 * float(r @ r)
         dg = torch.diagonal(A).clone(); accepted = False
@@ -619,13 +620,16 @@ def train_lm_inv(model, aa, target, escale, iscale, beta, max_iters, lam=1e-3, r
             i = 0
             for p in model.parameters():
                 n = p.numel(); p.copy_(v[i:i + n].view_as(p)); i += n
-        stop = not accepted or bool(wall_cap and time.perf_counter() - t0 > wall_cap)
+        hist.append(f)
+        flat = bool(plateau and len(hist) > plateau[0] and f > (1 - plateau[1]) * hist[-1 - plateau[0]])
+        timed_out = bool(wall_cap and time.perf_counter() - t0 > wall_cap)
+        stop = not accepted or flat or timed_out
         if record and (k % every == 0 or stop):
             record(it0 + k, 2 * f, lam)
         if ckpt and ((k + 1) % ckpt_every == 0 or stop or k == max_iters - 1):
             ckpt(it0 + k + 1, lam)
         if stop:
-            why = "no-descent" if not accepted else "walltime"; break
+            why = "no-descent" if not accepted else "plateau" if flat else "walltime"; break
     return k + 1, why, lam
 
 
