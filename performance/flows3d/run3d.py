@@ -15,7 +15,8 @@ Config keys:
           (core3d.train_lm_inv), "inv_angles" angles per torus for the invariance rows, checkpoints every "ckpt_every",
           and "plateau": [n, rtol] stops it once the loss has fallen by less than a fraction rtol over n steps
   init_from   a .pt file (path relative to this directory) or the name of an earlier run in the results folder:
-              its matching layers are loaded (warm start / grow a model)
+              its matching layers are loaded (warm start). With "grow": true, a narrower source fills the first units
+              of each wider layer and the new units' output weights start at zero, so the grown flow is the same map.
   device  "cpu" (default), "cuda" or "auto" (CUDA if present); float64 throughout. Checkpoints are saved as CPU
           tensors, so CPU and GPU runs can warm-start each other.
   seed, threads
@@ -85,8 +86,15 @@ def main(cfg, out_root):
         src_path = os.path.join(HERE, src_path) if src_path.endswith(".pt") else os.path.join(out_root, src_path, "model.pt")
         src = torch.load(src_path, weights_only=False, map_location=dev)["state"]
         own = m.state_dict(); keep = {k: v for k, v in src.items() if k in own and own[k].shape == v.shape}
+        if cfg.get("grow"):  # a narrower trained flow fills the first units of each layer; the rest start switched off
+            for k, v in src.items():
+                if k in own and k not in keep and own[k].dim() == v.dim() and all(a >= b for a, b in zip(own[k].shape, v.shape)):
+                    big = own[k].clone(); big[tuple(slice(0, n) for n in v.shape)] = v
+                    if k.endswith(".a"):  # zero output weights: the grown flow is the same map as the source
+                        big[v.shape[0]:] = 0
+                    keep[k] = big
         m.load_state_dict(keep, strict=False)
-        print(f"initialised {len(keep)}/{len(own)} tensors from {cfg['init_from']}", flush=True)
+        print(f"initialised {len(keep)}/{len(own)} tensors from {cfg['init_from']}{' (grown)' if cfg.get('grow') else ''}", flush=True)
     esc = m.toy.energy(Jt).reshape(-1, 1)
     ev = C.Evaluator(t_cpu, J=J_eval, n_angles=d.get("n_eval_angles", 1024), device=dev)
     t_off = st["t"] if st else 0.0
