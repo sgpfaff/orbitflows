@@ -130,3 +130,20 @@ python run3d.py configs/s2_sep_quartic.json        # 125 grid tori x 256 angles
 python run3d.py configs/s2b_sep_quartic_sobol.json # 1000 scattered tori x 32 angles, same residual budget
 python run3d.py configs/s3_isochrone.json          # spherical: isochrone target, spherical-oscillator toy
 ```
+
+## Width and growing (H100, 3 Nov)
+
+16 layers, β = 0, plateau rule [500, 0.01]. Held-out mean energy error (max in brackets); 7.2 GPU-h in all.
+
+| Run | Params | Seed 0 | Seed 1 |
+|---|---|---|---|
+| 32 wide, from scratch (depth runs) | 2,612 | 2.30e-4 (3.2e-3) | 1.43e-4 (2.2e-3) |
+| 64 wide, from scratch | 5,172 | 2.94e-4, plateau at 2,752 steps | stuck at 8.80e-3 |
+| 128 wide, from scratch | 10,292 | stuck at 8.67e-3, cancelled | 1.75e-5 (3.9e-4), plateau at 12,558 steps |
+| 64 wide, grown from 32 | 5,172 | 4.19e-5 (7.9e-4), plateau | 3.67e-5 (7.1e-4), max_iters |
+| 128 wide, grown from 32 | 10,292 | 1.32e-5 (3.3e-4), walltime | 1.13e-5 (3.7e-4), walltime |
+
+- Width is the lever: 4x the parameters gives ~15x lower error (roughly N^-2), from the same starting map. The grown 128-wide runs were still falling at the 1.9 h cap (s0 by 3.4% per 500 steps), so that is a lower bound on the gain.
+- Grown 128 wide: torus-mean E against exact H(J) ≤ 2.8e-6, frequencies ≤ 3.5e-5, |L| wander 2e-5.
+- 2 of 4 wide runs from scratch fell into the same wrong solution (held-out 8.7e-3, |L| wander 0.26 median / 0.447 max, training loss 2-5e-5) within the first 500 LM steps. The |L| wander after Adam does not predict it: 5 of 8 depth runs left Adam at 0.28-0.29 and all escaped. Growing from a trained narrow flow avoids the problem.
+- Grown runs need ~10-20k LM steps (0.14 s/step at 64 wide, 0.36 s/step at 128 wide on an H100).
