@@ -196,8 +196,23 @@ td.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums; white-space
       <div class="cap" id="sweep-cap"></div></div>
   </section>
 
+  <section id="depth">
+    <div class="eyebrow">6 · Depth against width, finished on an H100</div>
+    <h2>Every run stalls at 1–4×10⁻⁴, and depth doesn’t help</h2>
+    <div class="prose"><p>In 1D, depth beat width at equal parameter count: 32 layers reached about 5×10⁻⁷ where 16 stalled near 10⁻⁵. This tests the same question in 3D, on the stage-3 isochrone problem (same toy, 125 training tori × 256 angles, same held-out set), training from scratch rather than fine-tuning. Two flows of about 2,600 parameters each: <b>16 nonlinear layers 32 wide</b> and <b>32 layers 16 wide</b>, each trained with the energy loss alone (β = 0) and with the invariance term (β = 0.01), two seeds each. Every run does 1,000 Adam steps, then Levenberg–Marquardt with geodesic acceleration.</p>
+    <p>All eight ran on geir for 21 h from 2 Nov. By then the β = 0 runs had been flat for over 1,500 steps, and were stopped. The β = 0.01 runs, 5–7× slower per step, moved to one H100 each on 3 Nov. Each continued from its geir checkpoint and stopped on its own once its loss fell by less than 1% over 500 steps.</p></div>
+    <div class="fig"><h3>Held-out diagnostics against LM step, all eight runs</h3>
+      <div id="depth-legend"></div>
+      <div class="grid2" id="fig-depth"></div>
+      <div class="cap">Held-out measures as in section 5, logged every 10 steps. The β = 0.01 curves switch from geir to the H100 partway through (table below); the switch leaves no mark because the run continues from the same state.</div></div>
+    <div class="fig"><h3>Where each run stopped</h3><div class="tablewrap" id="depth-table"></div>
+      <div class="cap" id="depth-cap"></div></div>
+    <div class="fig"><h3>Seconds per LM step: geir against one H100</h3><div class="tablewrap" id="depth-speed"></div>
+      <div class="cap" id="depth-speed-cap"></div></div>
+  </section>
+
   <section id="log">
-    <div class="eyebrow">6 · Decisions</div>
+    <div class="eyebrow">7 · Decisions</div>
     <h2>Decision log</h2>
     <div class="log" id="decisions"></div>
   </section>
@@ -231,12 +246,23 @@ function renderAll() {
   }
 }
 
+/* ---------- depth experiment: lookups shared with the summary ---------- */
+const DP = DATA.depth || [];
+const DPC = {'16_0': '--s1', '16_0.01': '--s7', '32_0': '--s2', '32_0.01': '--s4'};
+const dpKey = r => `${r.depth}_${r.beta}`;
+const dpLab = r => `${r.depth} layers × ${r.width} wide, β = ${r.beta}`;
+const dpFind = (d, b, s) => DP.find(r => r.depth === d && r.beta === b && r.seed === s);
+const DEPTH_PAIRS = [], DEPTH_SEEDS = [];  // 16 against 32 layers at the same beta and seed; seed 0 against seed 1 per flow
+for (const b of [0, 0.01]) for (const s of [0, 1]) { const a = dpFind(16, b, s), c = dpFind(32, b, s); if (a && c) DEPTH_PAIRS.push({b, s, a: a.final, c: c.final}); }
+for (const d of [16, 32]) for (const b of [0, 0.01]) { const a = dpFind(d, b, 0), c = dpFind(d, b, 1); if (a && c) DEPTH_SEEDS.push({d, b, ratio: Math.max(a.final.eval_mean, c.final.eval_mean) / Math.min(a.final.eval_mean, c.final.eval_mean)}); }
+
 /* ---------- header, tiles, summary ---------- */
 (function () {
   const S = DATA.sanity, nok = S.filter(s => s.ok).length;
   $('#status').innerHTML = `<span><i class="dot" style="background:var(--good)"></i>${nok}/${S.length} sanity checks pass</span>` +
     `<span><i class="dot"></i>3 targets trained on the laptop</span>` +
-    `<span><i class="dot" style="background:${DATA.invariance ? 'var(--good)' : 'var(--warn)'}"></i>invariance experiment ${DATA.invariance ? 'finished' : 'running'}</span>`;
+    `<span><i class="dot" style="background:${DATA.invariance ? 'var(--good)' : 'var(--warn)'}"></i>invariance experiment ${DATA.invariance ? 'finished' : 'running'}</span>` +
+    (DATA.depth && DATA.depth.length ? `<span><i class="dot" style="background:var(--good)"></i>depth test finished (geir, then H100)</span>` : '');
   const last = n => { const c = DATA.curves[n]; return c ? c[c.length - 1].ev : null; };
   const tiles = [
     ['Anisotropic oscillator', '2.6e-16', 'held-out error with linear shears only, by LM step 15: machine precision (the exact map is linear)'],
@@ -248,7 +274,8 @@ function renderAll() {
   $('#summary').innerHTML = `<ul>
     <li><b>The 3D pipeline is exact where it should be.</b> Both toy maps are symplectic to round-off, the ground truth is good to 10⁻¹⁶, and with only linear layers the oscillator target is learned to machine precision.</li>
     <li><b>Nonlinear 3D targets train well but not yet to high precision</b> on laptop budgets (20–25 minutes): about 6×10⁻⁴ for both the separable quartic and the isochrone.</li>
-    <li><b>The main finding so far:</b> the energy-variance loss barely constrains deformations along slow angle combinations. On the isochrone, the learned tori are energy-constant to ${fmt(d3.median(DATA.isochrone.per_torus.energy))} (median), but their angular momentum wanders ${Math.round(d3.median(DATA.isochrone.per_torus.wander) / d3.median(DATA.isochrone.per_torus.energy))}× more, in modes with k·Ω ≈ 0 (section 3). Training longer on the energy loss alone roughly halves it, and adding a small invariance term (β = 0.01) cuts it by a further ~20% at equal steps, while also lowering the energy error (section 5).</li></ul>`;
+    <li><b>The main finding so far:</b> the energy-variance loss barely constrains deformations along slow angle combinations. On the isochrone, the learned tori are energy-constant to ${fmt(d3.median(DATA.isochrone.per_torus.energy))} (median), but their angular momentum wanders ${Math.round(d3.median(DATA.isochrone.per_torus.wander) / d3.median(DATA.isochrone.per_torus.energy))}× more, in modes with k·Ω ≈ 0 (section 3). Training longer on the energy loss alone roughly halves it, and adding a small invariance term (β = 0.01) cuts it by a further ~20% at equal steps, while also lowering the energy error (section 5).</li>
+    ${DATA.depth && DATA.depth.length ? `<li><b>Depth doesn’t help in 3D</b> (section 6). At about 2,600 parameters, 16 layers end lower than 32 in ${DEPTH_PAIRS.filter(p => p.a.eval_mean < p.c.eval_mean).length} of ${DEPTH_PAIRS.length} matched pairs, and every run stalls between ${sup(d3.min(DATA.depth, r => r.final.eval_mean))} and ${sup(d3.max(DATA.depth, r => r.final.eval_mean))}. Two seeds of the same flow differ by up to ${d3.max(DEPTH_SEEDS, p => p.ratio).toFixed(1)}×, as much as depth or β changes things. That points to where each run settles rather than to the architecture. On an H100, a 3D LM step is about 70× faster than on geir.</li>` : ''}</ul>`;
 })();
 
 /* ---------- sanity table ---------- */
@@ -381,6 +408,45 @@ if (SW.length) {
     $('#sweep-cap').innerHTML = `Bold marks the best of the three at equal steps. At ${S0.toLocaleString()} steps, β = 0.01 is below the control on every measure: energy error ${pct('energy')}% lower, worst-torus energy error ${pct('energy_max')}%, median |L| wander ${pct('wander')}%, worst-torus wander ${pct('wander_max')}%, invariance residual ${pct('inv')}%. Its wander is also lower than the control reached after ${c.it[c.it.length - 1].toLocaleString()} steps. β = 0.1 over-weights the invariance term: its energy error falls slowly and its wander ends worse than where it started.`; }
 }
 
+/* ---------- depth experiment ---------- */
+if (DP.length) {
+  const cfgs = [...new Map(DP.map(r => [dpKey(r), r])).values()];
+  $('#depth-legend').innerHTML = legend([...cfgs.map(r => [tok(DPC[dpKey(r)]), dpLab(r)]), [tok('--ink-2'), 'seed 1 dashed, seed 0 solid', true]]);
+  chart('fig-depth', el => {
+    const w = document.createDocumentFragment();
+    [['energy', 'held-out energy error (mean)'], ['energy_max', 'held-out energy error (worst torus)'], ['wander', '|L| wander (median torus)'], ['inv', 'invariance residual (rms)']].forEach(([k, lab]) => {
+      const d = document.createElement('div'); d.className = 'plot'; w.append(d);
+      const rows = DP.flatMap(r => r.it.map((it, i) => ({x: it + 1, v: r[k][i], key: dpKey(r), s: r.seed, n: r.name, lab: dpLab(r)})).filter(p => p.v > 0));
+      const line = s => Plot.line(rows.filter(p => p.s === s), {x: 'x', y: 'v', z: 'n', stroke: p => tok(DPC[p.key]), strokeWidth: 1.8, ...(s ? {strokeDasharray: '5,3'} : {}),
+        tip: true, title: p => `${p.lab}, seed ${p.s}\nLM step ${p.x - 1}: ${fmt(p.v)}`});
+      d.append(Plot.plot(base(el, {width: Math.max(260, (el.clientWidth - 12) / (el.clientWidth > 700 ? 2 : 1)), height: 240, marginLeft: 58, marginTop: 26,
+        x: {type: 'log', label: 'LM step + 1 →', domain: [1, d3.max(rows, r => r.x) * 1.2]}, y: {type: 'log', label: `↑ ${lab}`, domain: logDom(rows.map(r => r.v), 1.15), tickFormat: '.1e'},
+        marks: [line(0), line(1)]})));
+    });
+    return w;
+  });
+  const keys = [['eval_mean', 'Energy error, mean'], ['eval_max', 'Energy error, worst torus'], ['L_wander_median', '|L| wander, median torus'], ['invariance_rms', 'Invariance residual'],
+    ['torus_E_err_max', 'Torus energy vs exact H(J), max'], ['freq_err_max', 'Frequencies vs exact, max']];
+  const best = k => d3.min(DP, r => r.final[k]);
+  const how = r => {
+    if (r.lm_stop === 'plateau') return `plateau rule, on the H100 after ${Math.round(60 * r.h_gpu)} min there`;
+    const i = r.it.length - 1, j = r.it.findIndex(it => it >= r.it[i] - 1000);
+    const c = 100 * (r.energy[i] / r.energy[j] - 1);
+    return `stopped by hand; ${c < 0 ? '−' : '+'}${Math.abs(c).toFixed(1)}% over its last 1,000 steps`;
+  };
+  $('#depth-table').innerHTML = `<table><thead><tr><th>Flow</th><th style="text-transform:none">β</th><th>Seed</th><th>LM steps</th><th>How it stopped</th>${keys.map(k => `<th>${k[1]}</th>`).join('')}</tr></thead><tbody>
+    ${DP.map(r => `<tr><td>${r.depth} layers × ${r.width} <span class="mono">(${r.n_params.toLocaleString()})</span></td><td class="num">${r.beta}</td><td class="num">${r.seed}</td><td class="num">${r.steps.toLocaleString()}</td><td>${how(r)}</td>
+      ${keys.map(([k]) => `<td class="num">${r.final[k] === best(k) ? '<b>' + fmt(r.final[k]) + '</b>' : fmt(r.final[k])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  const n = DEPTH_PAIRS.length, lowerMean = DEPTH_PAIRS.filter(p => p.a.eval_mean < p.c.eval_mean).length, lowerMax = DEPTH_PAIRS.filter(p => p.a.eval_max < p.c.eval_max).length,
+    lowerW = DEPTH_PAIRS.filter(p => p.a.L_wander_median < p.c.L_wander_median).length;
+  const bEff = d => [0, 1].map(s => { const a = dpFind(d, 0, s), c = dpFind(d, 0.01, s); return a && c ? Math.round(100 * (c.final.eval_mean / a.final.eval_mean - 1)) : null; }).filter(v => v != null).map(v => (v > 0 ? '+' : '−') + Math.abs(v) + '%').join(' and ');
+  $('#depth-cap').innerHTML = `Bold marks the best of the eight; the parameter count is in brackets. Every model was re-evaluated on the CPU from its checkpoint for this table (sanity check: the H100's own numbers agree to 10⁻¹³). <b>Depth:</b> at the same β and seed, 16 layers end lower than 32 in ${lowerMean} of ${n} pairs on the mean energy error, ${lowerMax} of ${n} on the worst torus and ${lowerW} of ${n} on the |L| wander. <b>Invariance term:</b> β = 0.01 changes the 32-layer energy error by ${bEff(32)} (seed 0 and seed 1), and the 16-layer one by ${bEff(16)}. <b>Seeds:</b> two seeds of the same flow end up to ${d3.max(DEPTH_SEEDS, p => p.ratio).toFixed(1)}× apart, as large as either effect. <b>Caveat:</b> LM can sit flat for a while and then drop. The 16-layer β = 0.01 seed-0 run was flat from step 700 to 850 on geir, then fell 10% in 40 steps, and then went flat again. So the 1%-in-500-steps rule may stop a run early; the β = 0 runs, flat for over 1,500 steps, are the firmer evidence.`;
+  const G = DP.filter(r => r.s_per_step_gpu);
+  $('#depth-speed').innerHTML = `<table><thead><tr><th>Run (β = 0.01)</th><th>geir, 4 threads</th><th>One H100</th><th>Speed-up</th><th>H100 time used</th></tr></thead><tbody>
+    ${G.map(r => `<tr><td>${r.depth} layers × ${r.width}, seed ${r.seed}</td><td class="num">${r.s_per_step_geir.toFixed(0)} s</td><td class="num">${r.s_per_step_gpu.toFixed(2)} s</td><td class="num"><b>${Math.round(r.s_per_step_geir / r.s_per_step_gpu)}×</b></td><td class="num">${Math.round(60 * r.h_gpu)} min</td></tr>`).join('')}</tbody></table>`;
+  $('#depth-speed-cap').innerHTML = `geir times are over each run’s last 100 steps there; geir is shared and was heavily loaded, so they vary. The H100 runs put all 125 tori in one batch (float64 throughout). For the energy loss alone, the benchmark job gave 0.13 s (16 layers) and 0.33 s (32 layers) per step on the H100, against 15–19 s on geir. The four H100 jobs used about ${d3.sum(G, r => r.h_gpu).toFixed(1)} GPU-hours in all.`;
+}
+
 /* ---------- decisions ---------- */
 $('#decisions').innerHTML = [
   ['New 6D layers, not the repo’s conditioners', 'In 3D a shear q ← q + f(p) is symplectic only if f is a gradient. The repo’s conditioners output independent components with per-component gates, which breaks that. The flow here uses SympNet gradient shears with a single gate, plus linear symmetric shears that can represent any linear symplectic map exactly.'],
@@ -391,6 +457,8 @@ $('#decisions').innerHTML = [
   ['Keep the torus grid', 'Spending the same residual budget on 1,000 scattered tori with 32 angles each reduced overfitting but slowed the fit; at equal steps the 125-torus grid with 256 angles is slightly ahead.'],
   ['Add an invariance residual', 'The energy loss is weak near resonances (section 3). Requiring Hamilton’s equations on the torus constrains those deformations directly and needs no other known integrals, which matters for potentials where only L_z is known.'],
   ['Weight it small: β ≈ 0.01', 'Equal weights (β = 1, laptop) and β = 0.1 (geir) let the invariance term dominate and make the energy error and the wander worse. At β = 0.01, close to the β ≈ 1/64 that balances the two terms, every held-out measure improves on the control at equal steps (section 5). Next: train with β = 0.01 from the start rather than as a fine-tune, and make the weighted step cheaper.'],
+  ['Run 3D training on the H100s', 'With all 125 tori in one batch, an LM step with the invariance term takes about 1 s for the 16-layer flow on one H100, against 80–90 s on geir (section 6); GPU and CPU results agree to 10⁻¹³. Jobs resume from checkpoints and stop on their own at a plateau, so a run costs minutes to an hour of GPU time rather than a day of a shared machine.'],
+  ['Depth is not the lever in 3D (at ~2,600 parameters)', 'Unlike 1D, 32 layers did no better than 16 at equal parameters, and every run stalls at 1–4×10⁻⁴, with seed-to-seed scatter as large as the depth effect. This points to where the optimiser settles, not to depth. Proposed next, not started: test parameter count (wider flows) and growing models from trained smaller ones, on the H100.'],
 ].map(([b, s]) => `<div><b>${b}</b><span>${s}</span></div>`).join('');
 
 renderAll();

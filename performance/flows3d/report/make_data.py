@@ -213,10 +213,60 @@ def sweep():
     return out
 
 
+def depth():
+    """Depth against width at ~2,600 parameters (configs/depth, configs/depth_h100): learning curves, and every final
+    model re-evaluated here on the CPU (the beta = 0.01 runs finished on an H100)."""
+    import re
+    sys.path.insert(0, ROOT); import run3d  # noqa: E402
+    resumed = {}  # run name -> LM step at which it resumed on the H100, from the Slurm logs
+    sdir = os.path.join(RES, "slurm")
+    for f in sorted(os.listdir(sdir)) if os.path.isdir(sdir) else []:
+        for m_ in re.finditer(r"resuming (depth_\S+) at lm step (\d+)", open(os.path.join(sdir, f)).read()):
+            resumed[m_.group(1)] = int(m_.group(2))
+    out = []
+    for d, w in ((16, 32), (32, 16)):
+        for b, bl in ((0.0, "b0"), (0.01, "b0p01")):
+            for s in (0, 1):
+                name = f"depth_d{d}_{bl}_s{s}"; jd = os.path.join(RES, name)
+                if not os.path.exists(os.path.join(jd, "state.pt")):
+                    continue
+                raw = [json.loads(l) for l in open(os.path.join(jd, "log.jsonl")) if l.strip()]
+                seen, rows = set(), []
+                for r in raw:  # a resumed job logs its restart step twice; keep the first record of each step
+                    if r["stage"] == "lm" and r["it"] not in seen:
+                        seen.add(r["it"]); rows.append(r)
+                c = json.load(open(os.path.join(jd, "config.json"))); st = torch.load(os.path.join(jd, "state.pt"), weights_only=False)
+                t = C.make_target(c["target"]); m = C.build_model(c["model"], c["toy"], seed=c.get("seed", 0)); m.load_state_dict(st["state"])
+                ev = C.Evaluator(t, J=grids(c)[1], n_angles=c["data"].get("n_eval_angles", 1024))
+                fin = ev.quick(m); fin.update(run3d.spherical_diagnostics(m, ev.target, ev.J, ev.th)); af = ev.action_freq(m)
+                fin.update(torus_E_err_max=max(af["rel_E_err"]), freq_err_max=max(af["rel_freq_err"]))
+                rec = dict(name=name, depth=d, width=w, beta=b, seed=s, n_params=C.n_params(m), steps=st["it"], h_total=st["t"] / 3600,
+                           it=[r["it"] for r in rows], energy=[r["eval_mean"] for r in rows], energy_max=[r["eval_max"] for r in rows],
+                           wander=[r.get("L_wander_median") for r in rows], inv=[r.get("invariance_rms") for r in rows], final=fin)
+                n0 = resumed.get(name)
+                if n0 is not None:  # split the wall time between geir and the H100 at the resume step
+                    k = max(i for i, r in enumerate(raw) if r["stage"] == "lm" and r["it"] == n0)
+                    gpu = [r for r in raw[k:] if r["stage"] == "lm"]
+                    pre = [r for r in raw[:k] if r["stage"] == "lm" and r["it"] >= n0 - 100]
+                    rec.update(resumed_at=n0, s_per_step_gpu=(gpu[-1]["t"] - gpu[0]["t"]) / max(gpu[-1]["it"] - gpu[0]["it"], 1),
+                               s_per_step_geir=(pre[-1]["t"] - pre[0]["t"]) / max(pre[-1]["it"] - pre[0]["it"], 1),
+                               h_gpu=(gpu[-1]["t"] - gpu[0]["t"]) / 3600)
+                rp = os.path.join(jd, "result.json")
+                if os.path.exists(rp):
+                    r = json.load(open(rp)); rec["lm_stop"] = r["lm_stop"]
+                    rec["gpu_vs_cpu"] = abs(r["final"]["eval_mean"] / fin["eval_mean"] - 1)
+                out.append(rec)
+    return out
+
+
 def main():
     t0 = time.perf_counter()
     data = dict(generated=time.strftime("%Y-%m-%d %H:%M"), sanity=sanity(), curves=curves(), generalisation=generalisation(),
-                quartic=quartic_portraits(), isochrone=isochrone_pictures(), sweep=sweep())
+                quartic=quartic_portraits(), isochrone=isochrone_pictures(), sweep=sweep(), depth=depth())
+    G = [r["gpu_vs_cpu"] for r in data["depth"] if "gpu_vs_cpu" in r]
+    if G:
+        data["sanity"].append(dict(group="GPU", what=f"H100-trained models ({len(G)}): held-out error on the H100 against a CPU re-evaluation, max relative difference",
+                                    value=max(G), target="< 1e-10", ok=max(G) < 1e-10))
     p = os.path.join(RES, "exp_invariance.json")
     if os.path.exists(p):
         data["invariance"] = json.load(open(p))

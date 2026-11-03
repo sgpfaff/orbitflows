@@ -93,6 +93,35 @@ python run_batch.py configs/sweep_beta/*.json --workers 6 --threads 3   # 18 cor
 cat results/batch_status.txt
 ```
 
+## Depth against width (geir, then H100, 2–3 Nov)
+
+`configs/depth/` trains the stage-3 isochrone problem from scratch with two flows of about 2,600 parameters each:
+- 16 nonlinear layers 32 wide (2,612 parameters);
+- 32 layers 16 wide (2,628 parameters).
+
+Each flow is trained with β = 0 and β = 0.01, two seeds each: 1,000 Adam steps, then geodesic LM. In 1D, depth won at equal parameters (32 layers ≈ 5×10⁻⁷ against ~10⁻⁵ for 16).
+
+All eight ran on geir for 21 h. The β = 0 runs were then stopped, having been flat for over 1,500 LM steps. The β = 0.01 runs continued on one H100 each (`configs/depth_h100/`, same run names, so they resume from the geir checkpoints): all 125 tori in one chunk, and a new `plateau` rule, which stops a run once its loss falls by less than 1% over 500 steps. They stopped on that rule after 9–65 min, 2.6 GPU-hours in all.
+
+Held-out energy error at the end (re-evaluated on the CPU; the H100's numbers agree to 4×10⁻¹³):
+
+| Flow | β = 0, seed 0 | β = 0, seed 1 | β = 0.01, seed 0 | β = 0.01, seed 1 |
+|---|---|---|---|---|
+| 16 layers × 32 | 2.3×10⁻⁴ (4,740 steps) | 1.4×10⁻⁴ (4,650) | 2.7×10⁻⁴ (1,421) | **1.3×10⁻⁴** (4,452) |
+| 32 layers × 16 | 3.9×10⁻⁴ (3,770) | 3.9×10⁻⁴ (3,740) | 2.8×10⁻⁴ (1,583) | 2.0×10⁻⁴ (2,189) |
+
+- **Depth doesn't help in 3D at this size.** In all four matched pairs (same β and seed), 16 layers end lower than 32 on the mean energy error, the worst torus and the |L| wander.
+- **The invariance term helps the 32-layer flow** (−28% and −48%), but is mixed for 16 layers (+19% and −8%).
+- **The two seeds of one flow end up to 2.1× apart,** as large as either effect. Every run stalls at 1–4×10⁻⁴, which points to where the optimiser settles rather than to the architecture.
+- **The plateau rule can stop a run early.** LM sometimes sits flat and then drops: one run was flat from step 700 to 850, then fell 10% in 40 steps. The β = 0 plateaus (over 1,500 steps) are the firmer evidence.
+
+**Speed:** with the invariance term, an LM step takes 1.07 s (16 layers) and 1.8 s (32 layers) on one H100, against 81–128 s on geir (70–84×).
+
+```bash
+# on trillium-gpu, in $SCRATCH/orbitflows/performance/flows3d (results/<name>/state.pt present to resume)
+sbatch --time=03:00:00 trillium_gpu3d.sh run3d.py configs/depth_h100/depth_d16_b0p01_s1.json
+```
+
 ## Run
 
 ```bash
