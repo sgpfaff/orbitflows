@@ -266,6 +266,17 @@ def main():
                     stages=j["stages"][:-1] + [lm], **extra)
     batches["deep2g"] = [cont_deep(j) for j in batches["mwt16deep"]] + [cont_deep(batches["mwt16deep"][0], 512)]
 
+    # ---- the MW depth floor: do the 48/64-layer "no descent" stops come from rounding in Phi(z) - Phi(0)? ----
+    # every cont4g run ended with LM finding no descent step; at the best 48-layer model the rounding noise of the direct
+    # Phi(z) - Phi(0) (99.8% from z_max < 30 pc) nearly cancels the true gradient (the clean one is 16.5x larger).
+    # Four of those runs continued from their final states with the same data and LM recipe, only mw_dphi changed:
+    # the best 48 x 32, the two best 64 x 32, and a 64 x 32 that stopped after 307 steps. 2.7 h each (3 h Slurm limit).
+    CLEAN = ("c3_L48w32_fix_a512_s1", "dep_L64_w32_s1", "d3_L64w32_lrnA_a512_s0", "dep_L64_w32_s0")
+    batches["cleanc"] = [dict(j, batch="cleanc_v2", mw_dphi="cancellation_free",
+                              init={"from": f"cont4g_v2/{j['name']}", "stage": len(j["stages"]) - 1},
+                              stages=j["stages"][:-1] + [dict(j["stages"][-1], wall_hours=2.7)])
+                         for n in CLEAN for j in batches["cont4g"] if j["name"] == n]
+
     for b, jobs in batches.items():
         path = os.path.join(HERE, "jobs", f"{b}_{p}.jsonl")
         with open(path, "w") as fh:
