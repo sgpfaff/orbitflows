@@ -10,7 +10,8 @@ Data, toy and recipe are the test bed's (make_jobs.py mwteacher): MW range 5 pc 
 
     python mini_lab.py cost L W [L W ...]             time one Adam step, one LM step and one held-out evaluation
     python mini_lab.py teacher L W [--seed S] [--cap N] train an MW model L x W and freeze it as teachers/mini_LxW.pt
-    python mini_lab.py student L W SEED [--cap N] [--wall S]   a same-size student of teachers/mini_LxW.pt
+    python mini_lab.py student L W SEED [--cap N] [--wall S] [--teacher TLxTW]   a student of teachers/mini_LxW.pt
+        (or of a teacher of another size: results in students/LxW_of_TLxTW)
     python mini_lab.py analyse [--sizes 4x8,...]       success rates, alignment over training, twist, figure, summary
     python mini_lab.py bezier L W SEED [--k 12] [--iters 300]  curved-path test student -> teacher
 Every run writes RES/<kind>/<LxW>/s<seed>/{config.json, state.pt, curve.npz, result.json}. curve.npz holds the learning
@@ -183,11 +184,14 @@ def cmd_teacher(a):
 
 
 def cmd_student(a):
+    """A student L x W of teachers/mini_<teacher>.pt (default: the same size); other sizes go to students/LxW_of_<teacher>."""
     L, W = a.L, a.W
-    jdir = os.path.join(RES, "students", f"{L}x{W}", f"s{a.seed}")
+    TL, TW = (int(x) for x in a.teacher.split("x")) if a.teacher else (L, W)
+    tag = f"{L}x{W}" if (TL, TW) == (L, W) else f"{L}x{W}_of_{TL}x{TW}"
+    jdir = os.path.join(RES, "students", tag, f"s{a.seed}")
     if os.path.exists(os.path.join(jdir, "result.json")) and not a.force:
         print("done:", jdir); return
-    cfg = make_cfg(f"mini_S_{L}x{W}_s{a.seed}", "mini_students", L, W, a.seed, teacher=teacher_file(L, W))
+    cfg = make_cfg(f"mini_S_{tag}_s{a.seed}", "mini_students", L, W, a.seed, teacher=teacher_file(TL, TW))
     train(cfg, jdir, lm_cap=a.cap, stall=(1000, 1e-5), wall=a.wall)
 
 
@@ -532,6 +536,7 @@ def main():
     p.add_argument("--seed", type=int, default=0); p.add_argument("--cap", type=int, default=3000); p.add_argument("--wall", type=float, default=None)
     p = sp.add_parser("student"); p.add_argument("L", type=int); p.add_argument("W", type=int); p.add_argument("seed", type=int)
     p.add_argument("--cap", type=int, default=3000); p.add_argument("--wall", type=float, default=None); p.add_argument("--force", action="store_true")
+    p.add_argument("--teacher", default=None, help="LxW of the teacher if it differs from the student")
     p = sp.add_parser("analyse"); p.add_argument("--sizes", default="2x8,2x16,4x8,4x16,8x16")
     p = sp.add_parser("figure"); p.add_argument("--focus", default="4x8")
     p = sp.add_parser("bezier"); p.add_argument("L", type=int); p.add_argument("W", type=int); p.add_argument("seed", type=int)

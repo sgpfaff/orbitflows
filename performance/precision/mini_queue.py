@@ -24,19 +24,22 @@ def main():
     ap.add_argument("--teacher-cap", type=int, default=8000); ap.add_argument("--teacher-wall", type=float, default=1800)
     ap.add_argument("--student-cap", type=int, default=30000); ap.add_argument("--student-wall", type=float, default=4500)
     ap.add_argument("--workers", type=int, default=90); ap.add_argument("--threads", type=int, default=2)
+    ap.add_argument("--teacher", default=None, help="LxW of an existing teacher: train only students of --sizes for it")
     a = ap.parse_args()
     res = os.environ["MINI_RES"]
     os.makedirs(os.path.join(res, "logs"), exist_ok=True)
     env = dict(os.environ, NTHREADS=str(a.threads), OMP_NUM_THREADS=str(a.threads), MKL_NUM_THREADS=str(a.threads),
                KMP_DUPLICATE_LIB_OK="TRUE")
     sizes = [tuple(int(x) for x in s.split("x")) for s in a.sizes.split(",")]
-    pending = [("teacher", L, W, None) for L, W in sizes]
+    TT = tuple(int(x) for x in a.teacher.split("x")) if a.teacher else None
+    pending = [] if TT else [("teacher", L, W, None) for L, W in sizes]
     pending += [("student", L, W, s) for L, W in sizes for s in range(a.seeds)]
     running = {}
 
     def ready(task):
         kind, L, W, _ = task
-        return kind == "teacher" or os.path.exists(os.path.join(HERE, "teachers", f"mini_{L}x{W}.pt"))
+        TL, TW = TT or (L, W)
+        return kind == "teacher" or os.path.exists(os.path.join(HERE, "teachers", f"mini_{TL}x{TW}.pt"))
 
     def launch(task):
         kind, L, W, s = task
@@ -45,6 +48,8 @@ def main():
             cmd = [sys.executable, "mini_lab.py", "teacher", str(L), str(W), "--cap", str(a.teacher_cap), "--wall", str(a.teacher_wall)]
         else:
             cmd = [sys.executable, "mini_lab.py", "student", str(L), str(W), str(s), "--cap", str(a.student_cap), "--wall", str(a.student_wall)]
+            if TT:
+                cmd += ["--teacher", a.teacher]; name += f"_of_{a.teacher}"
         log = open(os.path.join(res, "logs", name + ".log"), "w")
         running[name] = (subprocess.Popen(cmd, cwd=HERE, env=env, stdout=log, stderr=subprocess.STDOUT), log, time.time())
         print(f"{time.strftime('%H:%M:%S')} start {name}", flush=True)
