@@ -43,9 +43,9 @@ torch.set_num_threads(int(os.environ["NTHREADS"]))
 F64 = torch.float64
 
 REPO = "/Users/gabrielpfaffman/Repos/orbitflows"
-RES = f"{REPO}/performance/precision/results/landscape"
+RES = os.environ.get("LANDSCAPE_RES", f"{REPO}/performance/precision/results/landscape")  # cluster: env
 FIGS = f"{REPO}/performance/audit/figs/landscape"
-ORIG = f"{REPO}/performance/precision/results/node_final_1019/mwteacher_v2"
+ORIG = os.environ.get("LANDSCAPE_ORIG", f"{REPO}/performance/precision/results/node_final_1019/mwteacher_v2")
 SCR = "/private/tmp/claude-501/-Users-gabrielpfaffman-Repos-orbitflows/83657895-663a-4aa9-9083-bad2d0d05aa6/scratchpad"
 BASE = f"{ORIG}/mwt_std_s1"  # training set, evaluator and student module (all six originals share data/model/eval)
 JOBS = {**{f"{k}_s{s}": f"{ORIG}/mwt_{k}_s{s}" for k in ("geo", "std") for s in range(3)},
