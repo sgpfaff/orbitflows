@@ -4,8 +4,9 @@ Writes results/<name>/{config.json, log.jsonl, state.pt, model.pt, result.json, 
 `lm.ckpt_every` LM steps (atomically); rerunning the same command resumes from it, so a session can end at any time.
 
 Config keys:
-  target  {"kind": "aniso_ho" | "sep_quartic" | "isochrone", ...}
-  toy     {"omegas": [w, w, w]} (Cartesian oscillator) or {"kind": "spherical_ho", "omega": w}
+  target  {"kind": "aniso_ho" | "sep_quartic" | "isochrone" | "nfw" | "mw2014", ...}  (mw2014 has no exact H(J))
+  toy     {"omegas": [w, w, w]} (Cartesian oscillator), {"kind": "spherical_ho", "omega": w} or
+          {"kind": "isochrone", "GM": GM, "b": b} (the isochrone's exact action-angle map)
   data    {"n_per_axis": 5, "J_lo": [...], "J_hi": [...], "n_angles": 256}  or, for spherical toys,
           {"kind": "spherical", "n_per_axis": 5, "Jr": [lo, hi], "L": [lo, hi], "cosi_max": 0.9, "n_angles": 256}
   model   {"n_lin": 2, "n_blocks": 4, "width": 16, "gate_std": 1e-3}
@@ -44,15 +45,19 @@ def atomic_save(obj, path):
 
 
 def spherical_diagnostics(m, t, Jh, th, n_inv=256):
-    """|L| wander around each held-out torus relative to J_r + L, and the invariance residual (on n_inv angles)."""
+    """|L| and L_z wander around each held-out torus relative to J_r + L, and the invariance residual (on n_inv angles).
+    Spherical target: |L| is constant on any invariant torus, but the 3-tori are degenerate (Omega_3 = 0) and a learned
+    one may collect orbital planes along any loop enclosing the right solid angle, so L_z need not be constant on it.
+    Axisymmetric target: L_z is constant on the true tori and |L| is not."""
     aa = C.aa_points(Jh, th)
     with torch.no_grad():
         xv = m(aa.reshape(-1, 6)).view(Jh.shape[0], -1, 6)
-        Lm = torch.cross(xv[..., :3], xv[..., 3:], dim=-1).norm(dim=-1)
-        w = Lm.std(1) / (Jh[:, 0] + Jh[:, 1])
+        Lv = torch.cross(xv[..., :3], xv[..., 3:], dim=-1)
+        w = Lv.norm(dim=-1).std(1) / (Jh[:, 0] + Jh[:, 1]); wz = Lv[..., 2].std(1) / (Jh[:, 0] + Jh[:, 1])
     ai = aa[:, :n_inv]
     R, _ = C.invariance_residuals(m, ai, t, C.invariance_scale(m, ai))
-    return dict(L_wander_median=float(w.median()), L_wander_max=float(w.max()), invariance_rms=float(R.detach().pow(2).sum(-1).mean().sqrt()))
+    return dict(L_wander_median=float(w.median()), L_wander_max=float(w.max()), Lz_wander_median=float(wz.median()), Lz_wander_max=float(wz.max()),
+                invariance_rms=float(R.detach().pow(2).sum(-1).mean().sqrt()))
 
 
 def main(cfg, out_root):
@@ -106,7 +111,7 @@ def main(cfg, out_root):
         if spherical:
             rec.update(spherical_diagnostics(m, ev.target, ev.J, ev.th))
         logf.write(json.dumps(rec) + "\n"); logf.flush()
-        extra = f" |L|-wander={rec['L_wander_median']:.2e} inv={rec['invariance_rms']:.2e}" if spherical else ""
+        extra = f" |L|-wander={rec['L_wander_median']:.2e} Lz-wander={rec['Lz_wander_median']:.2e} inv={rec['invariance_rms']:.2e}" if spherical else ""
         print(f"[{cfg['name']}] {stage} it={it} loss={loss:.3e} held-out={rec['eval_mean']:.3e} max={rec['eval_max']:.3e}{extra} t={rec['t'] / 3600:.2f}h", flush=True)
 
     print(f"{cfg['name']}: {C.n_params(m)} parameters, {aa.shape[0]} tori x {aa.shape[1]} angles, on {dev}"
@@ -141,8 +146,10 @@ def main(cfg, out_root):
     json.dump(res, open(os.path.join(jdir, "result.json"), "w"))
     open(os.path.join(jdir, "DONE"), "w").write(time.strftime("%Y-%m-%d %H:%M:%S"))
     f = res["final"]
-    print(f"DONE {cfg['name']}: held-out {f['eval_mean']:.3e} max {f['eval_max']:.3e}; torus-mean E vs exact H(J) "
-          f"max {max(res['action_freq']['rel_E_err']):.1e}; frequencies max {max(res['action_freq']['rel_freq_err']):.1e}", flush=True)
+    af = res["action_freq"]
+    truth = (f"; torus-mean E vs exact H(J) max {max(af['rel_E_err']):.1e}; frequencies max {max(af['rel_freq_err']):.1e}"
+             if "rel_E_err" in af else "; no exact H(J) for this target")
+    print(f"DONE {cfg['name']}: held-out {f['eval_mean']:.3e} max {f['eval_max']:.3e}{truth}", flush=True)
 
 
 def _exit_on_signal(signum, _frame):

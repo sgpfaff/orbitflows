@@ -12,9 +12,13 @@ so the 1D repo conditioners (per-component outputs, per-component gates) do not 
   LinShear   q <- q + S p  with S symmetric         (or p <- p + S q); products of these give every linear
              symplectic map, so linear parts are represented exactly.
 
-Targets, all with exact ground truth for H(J):
+Targets:
   AnisoHO        sum_i (v_i^2 + w_i^2 x_i^2)/2              the exact map from an isotropic toy is linear
   SeparableQuartic sum_i (v_i^2/2 + w_i^2 x_i^2/2 + l_i x_i^4/4)  E(J) per axis by Gauss-Legendre quadrature
+  Isochrone      exact H(J) in closed form
+  NFW            spherical: H(J) and frequencies by quadrature (SphericalPotential, checked on the isochrone)
+  MWPotential2014  axisymmetric (Bovy 2015, as in galpy): no exact H(J); held-out energy variance and invariance only
+Toys: Cartesian or spherical isotropic oscillators, and the isochrone's exact action-angle map (IsochroneToy).
 """
 from __future__ import annotations
 
@@ -150,6 +154,131 @@ class Isochrone:
         return torch.stack([Or, OL, torch.zeros_like(Or)], -1)
 
 
+def _bisect(f, lo, hi, iters=100):
+    """Root of f (increasing, elementwise) in [lo, hi], by bisection on log r (vectorised, fixed iteration count)."""
+    lo, hi = torch.log(lo), torch.log(hi)
+    for _ in range(iters):
+        mid = 0.5 * (lo + hi); up = f(torch.exp(mid)) > 0
+        hi, lo = torch.where(up, mid, hi), torch.where(up, lo, mid)
+    return torch.exp(0.5 * (lo + hi))
+
+
+class SphericalPotential:
+    """Phi(r) in 3D; H(J_r, L) and the frequencies to ~1e-12 by quadrature. With r = (r_a + r_p)/2 - (r_a - r_p)/2 cos(u),
+    u in [0, pi], p_r = (r_a - r_p)/2 sin(u) sqrt(G) with G smooth, so J_r = (1/pi) int p_r dr, dJ_r/dE = 1/Omega_r =
+    (1/pi) int dr/p_r and Omega_psi/Omega_r = (L/pi) int dr/(r^2 p_r) all have smooth integrands (Gauss-Legendre in u).
+    Subclasses give phi(r) and phi(0) = E0. Exact ground truth runs on the CPU."""
+    r_lo, r_hi, n_gl = 1e-6, 1e4, 96
+
+    def pot(self, x):
+        return self.phi(torch.sqrt((x * x).sum(-1)))
+
+    def H(self, xv):
+        x, v = xv[..., :3], xv[..., 3:]
+        return 0.5 * (v * v).sum(-1) + self.pot(x)
+
+    def dphi(self, r):
+        r = r.detach().requires_grad_(True)
+        return torch.autograd.grad(self.phi(r).sum(), r)[0]
+
+    def _orbit(self, E, L):
+        """Pericentre and apocentre: the roots of 2 (E - Phi) r^2 - L^2 either side of the circular radius for L."""
+        lo, hi = torch.full_like(L, self.r_lo), torch.full_like(L, self.r_hi)
+        rc = _bisect(lambda r: r ** 3 * self.dphi(r) - L * L, lo, hi)
+        g = lambda r: 2 * (E - self.phi(r)) * r * r - L * L
+        return _bisect(lambda r: g(r), lo, rc), _bisect(lambda r: -g(r), rc, hi)
+
+    def _integrals(self, E, L):
+        """J_r, (1/pi) int dr/p_r and (L/pi) int dr/(r^2 p_r) at (E, L)."""
+        rp, ra = self._orbit(E, L)
+        x, w = _gl(self.n_gl); u = 0.5 * math.pi * (x + 1); w = 0.5 * math.pi * w
+        rm, dr = 0.5 * (ra + rp)[:, None], 0.5 * (ra - rp)[:, None]
+        r = rm - dr * torch.cos(u); s = torch.sin(u)
+        p2 = 2 * (E[:, None] - self.phi(r)) - (L * L)[:, None] / (r * r)
+        sqG = torch.sqrt(torch.clamp(p2, min=0.0)) / (dr * s)          # p_r / (dr sin u): smooth in u
+        Jr = (w * (dr * s) ** 2 * sqG).sum(-1) / math.pi
+        T = (w / sqG).sum(-1) / math.pi
+        P = L * (w / (r * r * sqG)).sum(-1) / math.pi
+        return Jr, T, P
+
+    def E_circ(self, L):
+        rc = _bisect(lambda r: r ** 3 * self.dphi(r) - L * L, torch.full_like(L, self.r_lo), torch.full_like(L, self.r_hi))
+        return self.phi(rc) + 0.5 * L * L / (rc * rc)
+
+    def E_of_J(self, J, iters=40):
+        """Newton on J_r(E, L) = J_r with dJ_r/dE = 1/Omega_r, kept above E_circ(L)."""
+        J = J.reshape(-1, 3).to(F64); Jr, L = J[:, 0], J[:, 1].abs()
+        Ec = self.E_circ(L)
+        E = Ec + 1e-3 * (Jr + 1e-12)
+        for _ in range(iters):
+            j, T, _ = self._integrals(E, L)
+            E = torch.maximum(E - (j - Jr) / T, 0.5 * (E + Ec))
+        return E
+
+    def freqs(self, J):
+        J = J.reshape(-1, 3).to(F64); L = J[:, 1].abs()
+        _, T, P = self._integrals(self.E_of_J(J), L)
+        return torch.stack([1 / T, P / T, torch.zeros_like(T)], -1)
+
+
+class SphericalIsochrone(SphericalPotential):
+    """The isochrone through the quadrature route: a check of SphericalPotential against the exact formulas."""
+    name = "isochrone_quadrature"
+
+    def __init__(self, GM=1.0, b=1.0):
+        self.GM, self.b = float(GM), float(b); self.E0 = -self.GM / (2 * self.b)
+
+    def phi(self, r):
+        return -self.GM / (self.b + torch.sqrt(self.b ** 2 + r * r))
+
+
+class NFW(SphericalPotential):
+    """Phi = -A ln(1 + r/a) / r, with A set so that v_c^2(r = 1) = normalize (galpy's convention: in natural units
+    R0 = 8 kpc, v0 = 220 km/s, the MWPotential2014 halo is a = 2, normalize = 0.35). Central value E0 = -A/a."""
+    name = "nfw"
+
+    def __init__(self, a=2.0, normalize=1.0):
+        self.a = float(a)
+        self.A = float(normalize) / (math.log1p(1 / self.a) - 1 / (1 + self.a))
+        self.E0 = -self.A / self.a
+
+    def phi(self, r):
+        return -self.A * torch.log1p(r / self.a) / r
+
+
+class MWPotential2014:
+    """Bovy (2015) as in galpy: power-law bulge with an exponential cut-off (alpha = 1.8, r_c = 1.9 kpc), Miyamoto-Nagai
+    disc (a = 3 kpc, b = 0.28 kpc) and NFW halo (a = 16 kpc), carrying 5%, 60% and 35% of v_c^2 at R0; natural units
+    R0 = 8 kpc, v0 = 220 km/s. Axisymmetric, so there is no exact H(J): only held-out energy variance and torus
+    invariance measure a model here. The bulge term is galpy's (zero at the centre, constant at infinity)."""
+    name = "mw2014"
+
+    def __init__(self):
+        from math import gamma
+        self.al, self.rc = 1.8, 1.9 / 8; self.ad, self.bd = 3.0 / 8, 0.28 / 8; self.ah = 2.0
+        s1 = 1.5 - self.al / 2
+        xb = torch.tensor(1 / self.rc ** 2, dtype=F64)
+        Mb = 2 * math.pi * self.rc ** (3 - self.al) * gamma(s1) * float(torch.special.gammainc(torch.tensor(s1, dtype=F64), xb))
+        self.Ab = 0.05 / Mb                                              # v_c^2(1) = G M(<1) / 1
+        self.Ad = 0.6 * (1 + (self.ad + self.bd) ** 2) ** 1.5
+        self.Ah = 0.35 / (math.log1p(1 / self.ah) - 1 / (1 + self.ah))
+        self.g0, self.g1 = gamma(1 - self.al / 2), gamma(s1)
+        self.E0 = -self.Ad / (self.ad + self.bd) - self.Ah / self.ah     # the bulge term is 0 at the centre
+
+    def pot(self, x):
+        R2, z = x[..., 0] ** 2 + x[..., 1] ** 2, x[..., 2]
+        r2 = R2 + z * z; r = torch.sqrt(r2); xb = r2 / self.rc ** 2
+        s0, s1 = torch.tensor(1 - self.al / 2, dtype=F64, device=x.device), torch.tensor(1.5 - self.al / 2, dtype=F64, device=x.device)
+        bulge = 2 * math.pi * self.rc ** (3 - self.al) * (self.g0 * torch.special.gammainc(s0, xb) / self.rc - self.g1 * torch.special.gammainc(s1, xb) / r)
+        disc = -1 / torch.sqrt(R2 + (self.ad + torch.sqrt(z * z + self.bd ** 2)) ** 2)
+        halo = -torch.log1p(r / self.ah) / r
+        return self.Ab * bulge + self.Ad * disc + self.Ah * halo
+
+    def H(self, xv):
+        x, v = xv[..., :3], xv[..., 3:]
+        return 0.5 * (v * v).sum(-1) + self.pot(x)
+
+
 def target_on(target, device):
     """A shallow copy of a target whose tensors (frequencies, quartic coefficients) live on `device`; H and pot
     then run there. Exact ground truth (E_of_J, freqs) should be evaluated on the original CPU target."""
@@ -177,6 +306,12 @@ def make_target(spec):
         return SeparableQuartic(spec.get("omegas", (1.0, 1.4, 1.9)), spec.get("lams", (0.5, 0.8, 1.2)))
     if kind == "isochrone":
         return Isochrone(spec.get("GM", 1.0), spec.get("b", 1.0))
+    if kind == "isochrone_quadrature":
+        return SphericalIsochrone(spec.get("GM", 1.0), spec.get("b", 1.0))
+    if kind == "nfw":
+        return NFW(spec.get("a", 2.0), spec.get("normalize", 1.0))
+    if kind == "mw2014":
+        return MWPotential2014()
     raise ValueError(kind)
 
 
@@ -231,6 +366,67 @@ class SphericalToyHO(torch.nn.Module):
 
     def energy(self, J):
         return self.w * (2 * J[..., 0] + J[..., 1])
+
+
+class IsochroneToy(torch.nn.Module):
+    """Isochrone (GM, b) in spherical actions (J_r, L, L_z) with angles (t_r, t_psi, t_Omega): the exact map (BT08 3.5.2,
+    rederived). With u = sqrt(b^2 + r^2), r^2 p_r^2 = -2E (u - u_p)(u_a - u), so u = u_m - D cos(eta) with u_m = GM/(-2E),
+    and t_r = eta - e sin(eta), e = D/u_m (Kepler's equation; eta = 0 at pericentre), solved by Newton from Danby's
+    start with a fixed number of steps (so vmap and forward-mode AD go through). In the orbital plane, measured from the
+    ascending node: psi = t_psi + d1 + lam d2 + (1 + lam) e sin(eta) / 2, lam = L / sqrt(L^2 + 4 GM b), dk = atan(k tan(eta/2))
+    - eta/2 with k1^2 = (u_a - b)/(u_p - b), k2^2 = (u_a + b)/(u_p + b). The node is at longitude t_Omega and cos i = L_z/L.
+    Near-circular orbits are cancellation-free: D^2 (GM)^2 = J_r (D + D0) (D^2 - (GM b / D0)^2), D = J_r + D0."""
+
+    def __init__(self, GM=1.0, b=1.0, n_newton=12):
+        super().__init__()
+        self.register_buffer("GM", torch.tensor(float(GM), dtype=F64))
+        self.register_buffer("b", torch.tensor(float(b), dtype=F64))
+        self.n_newton = n_newton
+
+    def _shape(self, J):
+        GM, b = self.GM, self.b; Jr, L = J[..., 0], J[..., 1]
+        s = torch.sqrt(L * L + 4 * GM * b); D0 = 0.5 * (L + s); D = Jr + D0
+        return GM, b, Jr, L, s, D0, D
+
+    def forward(self, aa):
+        tr, tp, tO = aa[..., 0], aa[..., 1], aa[..., 2]
+        Lz = aa[..., 5]
+        GM, b, Jr, L, s, D0, D = self._shape(aa[..., 3:])
+        m2E = (GM / D) ** 2                                                 # -2E
+        um = D * D / GM
+        Dl = torch.sqrt(Jr * (D + D0) * (D * D - (GM * b / D0) ** 2)) / GM  # half-width of the u range
+        e = Dl / um
+        uamb = um - b + Dl                                                  # u_a - b
+        upmb = L * L / (m2E * uamb)                                         # u_p - b, from (u_p - b)(u_a - b) = L^2/(-2E)
+        k1 = torch.sqrt(uamb / upmb); k2 = torch.sqrt((uamb + 2 * b) / (upmb + 2 * b))
+        eta = tr + 0.85 * e * torch.sign(torch.sin(tr))
+        for _ in range(self.n_newton):
+            eta = eta - (eta - e * torch.sin(eta) - tr) / (1 - e * torch.cos(eta))
+        x = 0.5 * eta; sx, cx = torch.sin(x), torch.cos(x)
+        d1 = torch.atan2((k1 - 1) * sx * cx, cx * cx + k1 * sx * sx)
+        d2 = torch.atan2((k2 - 1) * sx * cx, cx * cx + k2 * sx * sx)
+        lam = L / s; se = torch.sin(eta)
+        psi = tp + d1 + lam * d2 + 0.5 * (1 + lam) * e * se
+        umb = upmb + 2 * Dl * sx * sx                                       # u - b
+        r = torch.sqrt(umb * (umb + 2 * b))
+        vr = torch.sqrt(m2E) * Dl * se / r; vt = L / r
+        cp, sp = torch.cos(psi), torch.sin(psi)
+        X, Y, U, V = r * cp, r * sp, vr * cp - vt * sp, vr * sp + vt * cp
+        ci = Lz / L; si = torch.sqrt(torch.clamp(1 - ci * ci, min=0.0))
+        cO, sO = torch.cos(tO), torch.sin(tO)
+        n = torch.stack([cO, sO, torch.zeros_like(cO)], -1)              # ascending node
+        m = torch.stack([-ci * sO, ci * cO, si], -1)                      # in the plane, 90 degrees ahead of n
+        return torch.cat([X[..., None] * n + Y[..., None] * m, U[..., None] * n + V[..., None] * m], -1)
+
+    def energy(self, J):
+        """Toy energy above the centre, E(J) - Phi(0) > 0 (the per-torus scale of the training residuals)."""
+        GM, b, *_, D = self._shape(J)
+        return 0.5 * GM / b - 0.5 * (GM / D) ** 2
+
+    def freqs(self, J):
+        GM, b, Jr, L, s, D0, D = self._shape(J)
+        Or = GM ** 2 / D ** 3
+        return torch.stack([Or, 0.5 * (1 + L / s) * Or, torch.zeros_like(Or)], -1)
 
 
 def sobol_spherical_actions(n, Jr_lo, Jr_hi, L_lo, L_hi, cosi_max=0.9, seed=1):
@@ -329,12 +525,14 @@ class AAMap3D(torch.nn.Module):
 
 
 def build_model(mcfg, toy, seed=0, device="cpu"):
-    """toy: a list of three frequencies (Cartesian oscillator) or {"kind": "spherical_ho", "omega": w}. Parameters are
-    initialised on the CPU (same values on every device), then moved."""
+    """toy: a list of three frequencies (Cartesian oscillator), {"kind": "spherical_ho", "omega": w} or {"kind": "isochrone",
+    "GM": GM, "b": b}. Parameters are initialised on the CPU (same values on every device), then moved."""
     torch.manual_seed(seed)
     flow = Flow6(mcfg.get("n_lin", 2), mcfg.get("n_blocks", 8), mcfg.get("width", 32), mcfg.get("gate_std", 1e-3), seed)
     if isinstance(toy, dict) and toy.get("kind") == "spherical_ho":
         return AAMap3D(SphericalToyHO(toy["omega"]), flow).to(device)
+    if isinstance(toy, dict) and toy.get("kind") == "isochrone":
+        return AAMap3D(IsochroneToy(toy["GM"], toy["b"]), flow).to(device)
     return AAMap3D(Toy3D(toy["omegas"] if isinstance(toy, dict) else toy), flow).to(device)
 
 
@@ -424,8 +622,11 @@ def invariance_scale(model, aa):
     with torch.no_grad():
         toy = model.toy
         _, Zt = angle_tangents(toy, aa)
-        w = toy.w if toy.w.dim() else torch.stack([2 * toy.w, toy.w, 0 * toy.w])  # spherical toy: (2w, w, 0)
-        Xt = torch.einsum("nai,i->na", Zt, w).view(nO, nS, 6)
+        if hasattr(toy, "freqs"):  # frequencies that vary from torus to torus
+            Xt = torch.einsum("nai,ni->na", Zt, toy.freqs(aa.reshape(-1, 6)[:, 3:])).view(nO, nS, 6)
+        else:
+            w = toy.w if toy.w.dim() else torch.stack([2 * toy.w, toy.w, 0 * toy.w])  # spherical toy: (2w, w, 0)
+            Xt = torch.einsum("nai,i->na", Zt, w).view(nO, nS, 6)
         return Xt.pow(2).sum(-1).mean(-1).sqrt().view(nO, 1, 1)
 
 
@@ -437,8 +638,10 @@ class Evaluator:
         # held-out tori: between the training ones (or given)
         J = J if J is not None else action_grid(n_train_per_axis, J_lo, J_hi, midpoints=True)
         J = J.cpu()
-        self.E_true = target.E_of_J(J).reshape(-1, 1).to(device)
-        self.E_rel = self.E_true - target.E0  # energy above the potential minimum
+        self.exact = hasattr(target, "E_of_J")   # MWPotential2014 has no exact H(J)
+        if self.exact:
+            self.E_true = target.E_of_J(J).reshape(-1, 1).to(device)
+            self.E_rel = self.E_true - target.E0  # energy above the potential minimum
         self.J = J.to(device)
         self.th = angle_samples(n_angles, seed).to(device)          # held-out angles: an independent sequence
         self.aa = aa_points(self.J, self.th)
@@ -446,11 +649,13 @@ class Evaluator:
     @torch.no_grad()
     def quick(self, model):
         e = residuals(model, self.aa, self.target).abs()
-        H = self.target.H(model(self.aa.reshape(-1, 6))).view(*self.aa.shape[:2])
-        return dict(eval_mean=float(e.mean()), eval_max=float(e.max()),
-                    eval_mean_trueE=float(((H - H.mean(1, keepdim=True)) / self.E_rel).abs().mean()),
-                    energy_offset_max=float(((H.mean(1, keepdim=True) - self.E_true) / self.E_rel).abs().max()),
-                    origin_image_norm=float(model.flow(torch.zeros(1, 6, dtype=F64, device=self.aa.device)).norm()))
+        out = dict(eval_mean=float(e.mean()), eval_max=float(e.max()),
+                   origin_image_norm=float(model.flow(torch.zeros(1, 6, dtype=F64, device=self.aa.device)).norm()))
+        if self.exact:
+            H = self.target.H(model(self.aa.reshape(-1, 6))).view(*self.aa.shape[:2])
+            out.update(eval_mean_trueE=float(((H - H.mean(1, keepdim=True)) / self.E_rel).abs().mean()),
+                       energy_offset_max=float(((H.mean(1, keepdim=True) - self.E_true) / self.E_rel).abs().max()))
+        return out
 
     def action_freq(self, model, n=40):
         """Torus-mean energy against the exact H(J) (the image torus has actions J exactly) and model
@@ -458,6 +663,8 @@ class Evaluator:
         J = self.J[:: max(1, len(self.J) // n)].clone().requires_grad_(True)
         Hm = self.target.H(model(aa_points(J, self.th).reshape(-1, 6))).view(J.shape[0], -1).mean(-1)
         dHdJ = torch.autograd.grad(Hm.sum(), J)[0]
+        if not self.exact:  # the model's own frequencies only
+            return dict(J=J.detach().cpu().tolist(), model_freqs=dHdJ.cpu().tolist())
         Et = self.target_cpu.E_of_J(J.detach().cpu()).to(J.device); Om = self.target_cpu.freqs(J.detach().cpu()).to(J.device)
         scale = Om.abs().max(-1, keepdim=True).values  # some frequencies are zero (L_z in a spherical potential)
         return dict(rel_E_err=((Hm.detach() - Et) / (Et - self.target.E0)).abs().tolist(),

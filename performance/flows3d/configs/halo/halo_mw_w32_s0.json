@@ -1,0 +1,53 @@
+{
+ "toy": {
+  "kind": "isochrone",
+  "GM": 1.883539,
+  "b": 0.251428
+ },
+ "data": {
+  "kind": "spherical",
+  "n_per_axis": 5,
+  "Jr": [
+   0.01,
+   0.5
+  ],
+  "L": [
+   0.2,
+   2.0
+  ],
+  "cosi_max": 0.9,
+  "n_angles": 256
+ },
+ "target": {
+  "kind": "mw2014"
+ },
+ "seed": 0,
+ "threads": 24,
+ "device": "cuda",
+ "name": "halo_mw_w32_s0",
+ "model": {
+  "n_lin": 2,
+  "n_blocks": 8,
+  "width": 32,
+  "gate_std": 0.001
+ },
+ "adam": {
+  "steps": 1000,
+  "lr": 0.001
+ },
+ "lm": {
+  "invariance_beta": 0.0,
+  "inv_angles": 64,
+  "geodesic": true,
+  "every": 10,
+  "ckpt_every": 50,
+  "lam0": 0.001,
+  "plateau": [
+   500,
+   0.01
+  ],
+  "max_iters": 20000,
+  "wall_hours": 0.75,
+  "chunk": 128
+ }
+}
