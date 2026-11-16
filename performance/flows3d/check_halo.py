@@ -1,6 +1,7 @@
 """Checks for the halo benchmark pieces (laptop, a few seconds each): the isochrone toy is an exact action-angle map,
-the quadrature H(J) reproduces the isochrone's closed form, MWPotential2014 matches galpy, and the NFW frequencies
-match orbit integration. Writes results/halo_checks.json."""
+the quadrature H(J) reproduces the isochrone's closed form, MWPotential2014 matches galpy, the NFW frequencies match
+orbit integration, and galpy's own action-angle routines agree with the toy and the NFW ground truth. Writes
+results/halo_checks.json;  --galpy2 (galpy >= 2.0) compares with galpy's torch backend -> results/halo_galpy2.json."""
 import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 import json
@@ -94,6 +95,58 @@ def nfw_orbit_checks(n=8, seed=2):
                 angle_err_max=float(dang.abs().max()), n=n, steps_per_period=N)
 
 
+def _cyl(xv):
+    x, y, z, vx, vy, vz = [xv[:, i].numpy() for i in range(6)]
+    import numpy as np
+    R = np.hypot(x, y)
+    return R, (x * vx + y * vy) / R, (x * vy - y * vx) / R, z, vz, np.arctan2(y, x)
+
+
+def galpy_aa_checks(n=300, seed=3):
+    """Independent of the code here: galpy's actionAngleIsochrone recovers (J, theta, Omega) from the toy's points, and
+    its actionAngleSpherical reproduces the NFW quadrature (galpy's own radial integrals are good to ~1e-9)."""
+    import numpy as np
+    from galpy.actionAngle import actionAngleIsochrone, actionAngleSpherical
+    from galpy.potential import IsochronePotential, NFWPotential
+    cfg = json.load(open(os.path.join(HERE, "configs", "halo", "halo_mw_w32_s0.json"))); GM, b = cfg["toy"]["GM"], cfg["toy"]["b"]
+    g = torch.Generator().manual_seed(seed)
+    th = 2 * math.pi * torch.rand(n, 3, generator=g, dtype=F64)
+    Jr = 10 ** (-2 + 1.7 * torch.rand(n, generator=g, dtype=F64)); L = 10 ** (-0.7 + 1.0 * torch.rand(n, generator=g, dtype=F64))
+    Lz = L * 0.9 * (2 * torch.rand(n, generator=g, dtype=F64) - 1)
+    aa = torch.cat([th, torch.stack([Jr, L, Lz], -1)], -1); toy = C.IsochroneToy(GM, b)
+    jr, lz, jz, Or, Op, Oz, ar, ap, az = actionAngleIsochrone(ip=IsochronePotential(amp=GM, b=b)).actionsFreqsAngles(*_cyl(toy(aa)))
+    fr = toy.freqs(aa[:, 3:]).numpy(); Ln = L.numpy()
+    wrap = lambda d: float(np.max(np.abs((d + np.pi) % (2 * np.pi) - np.pi)))
+    out = dict(toy_actions=float(max(np.max(np.abs(jr - Jr.numpy()) / (Jr.numpy() + Ln)), np.max(np.abs(lz - Lz.numpy()) / Ln), np.max(np.abs(jz - (L - Lz.abs()).numpy()) / Ln))),
+               toy_freqs=float(max(np.max(np.abs(Or / fr[:, 0] - 1)), np.max(np.abs(Oz / fr[:, 1] - 1)))),
+               toy_angles=max(wrap(ar - th[:, 0].numpy()), wrap(az - th[:, 1].numpy()), wrap(ap - (th[:, 2] + torch.sign(Lz) * th[:, 1]).numpy())), n=n)
+    t = C.NFW(2.0, 1.0); nfw = NFWPotential(a=2.0, normalize=1.0)
+    J = C.spherical_action_grid(5, 0.01, 0.5, 0.2, 2.0, 0.9, midpoints=True)[::3]
+    E = t.E_of_J(J); Om = t.freqs(J).numpy(); rp, ra = t._orbit(E, J[:, 1])
+    R = (0.5 * (rp + ra)).numpy(); vT = J[:, 1].numpy() / R; vR = np.sqrt(2 * (E.numpy() - t.phi(torch.tensor(R)).numpy()) - vT ** 2)
+    jr2, _, _, Or2, Op2, _ = actionAngleSpherical(pot=nfw).actionsFreqs(R, vR, vT, 0 * R, 0 * R, 0 * R)
+    out.update(nfw_Jr=float(np.max(np.abs(jr2 / J[:, 0].numpy() - 1))), nfw_freqs=float(max(np.max(np.abs(Or2 / Om[:, 0] - 1)), np.max(np.abs(Op2 / Om[:, 1] - 1)))), nfw_n=len(R))
+    return out
+
+
+def galpy2_backend_check(n=4000, seed=1):
+    """galpy >= 2.0 only: its torch backend's MWPotential2014 (values and autograd forces) against the potential
+    written here, and against galpy's own numpy path."""
+    import numpy as np
+    import galpy
+    from galpy.potential import MWPotential2014, evaluatePotentials
+    rng = np.random.default_rng(seed)
+    r = 10 ** rng.uniform(-1.3, 0.7, n); ct = rng.uniform(-1, 1, n); ph = rng.uniform(0, 2 * np.pi, n); R, z = r * np.sqrt(1 - ct ** 2), r * ct
+    x = torch.tensor(np.stack([R * np.cos(ph), R * np.sin(ph), z], -1), dtype=F64)
+    mw = C.MWPotential2014(); mg = C.MWPotential2014(backend="galpy")
+    xa = x.clone().requires_grad_(True); Pn = mw.pot(xa); gn = torch.autograd.grad(Pn.sum(), xa)[0]
+    xb = x.clone().requires_grad_(True); Pg = mg.pot(xb); gg = torch.autograd.grad(Pg.sum(), xb)[0]
+    Pnp = evaluatePotentials(MWPotential2014, R, z)
+    return dict(galpy=galpy.__version__, torch=torch.__version__, n=n,
+                pot_vs_native=float(((Pn - Pg).abs() / (Pg - mw.E0).abs()).max()), force_vs_native=float(((gn - gg).norm(dim=-1) / gg.norm(dim=-1)).max()),
+                pot_vs_numpy=float(np.max(np.abs(Pg.detach().numpy() - Pnp) / np.abs(Pnp - mw.E0))))
+
+
 def identity_check():
     """Isochrone toy onto the same isochrone with the flow switched off (gates and linear shears zero): the identity
     is the exact answer, so the held-out error and the errors against the exact H(J) should be at round-off."""
@@ -109,7 +162,10 @@ def identity_check():
 
 
 if __name__ == "__main__":
-    out = dict(toy=toy_checks(), quadrature=quadrature_checks(), mw=mw_checks(), identity=identity_check())
+    if "--galpy2" in sys.argv:  # run in an environment with galpy >= 2.0 (torch backend)
+        out = galpy2_backend_check(); print(json.dumps(out, indent=1))
+        json.dump(out, open(os.path.join(HERE, "results", "halo_galpy2.json"), "w"), indent=1); sys.exit()
+    out = dict(toy=toy_checks(), quadrature=quadrature_checks(), mw=mw_checks(), identity=identity_check(), galpy_aa=galpy_aa_checks())
     print(json.dumps(out, indent=1), flush=True)
     if "--orbits" in sys.argv:
         out["nfw_orbits"] = nfw_orbit_checks(); print(json.dumps(out["nfw_orbits"], indent=1))

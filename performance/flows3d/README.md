@@ -168,6 +168,10 @@ Checks (`check_halo.py`, re-run by `report/make_data.py`):
 | NFW frequencies against orbit integration over one radial period | 9e-11 |
 | `MWPotential2014` against galpy (numpy path), potential and force | 4e-14 |
 
-`MWPotential2014` is written directly in torch. galpy's torch backend, chosen earlier as the definition of the 3D Milky Way target, differs from it by up to 1e-8 in potential and 9e-8 in force (bulge term); `{"kind": "mw2014", "backend": "galpy"}` calls it instead where a development galpy is installed.
+| galpy's `actionAngleIsochrone` on the toy's points: actions, frequencies, angles returned as put in | 3e-14, 2e-15, 5e-13 |
+| NFW quadrature against galpy's `actionAngleSpherical`: J_r, frequencies (galpy's integrals are good to ~1e-9) | 6e-13, 1e-9 |
+| `MWPotential2014` against galpy 2.0.0b1's torch backend, potential and autograd force (`check_halo.py --galpy2`) | 1e-15, 4e-15 |
+
+`MWPotential2014` is written directly in torch. galpy's torch backend was chosen earlier as the definition of the 3D Milky Way target; as of the 2.0.0b1 pre-release (`pip install --pre galpy`, in `~/.venvs/galpy-2b1` on the laptop) it agrees with the native one to round-off, where the earlier development build was 1e-8 off in the bulge. `{"kind": "mw2014", "backend": "galpy"}` calls it instead. Its bulge has no forward-mode derivative, so `vmap(hessian)` fails on it; that only matters for LM with the invariance term (β > 0).
 
 Runs: stage 1 submitted to H100s on 16 Nov (jobs 1344003–06).

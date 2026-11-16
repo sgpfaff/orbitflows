@@ -318,9 +318,12 @@ def halo():
     sys.path.insert(0, ROOT); import make_halo_configs as M  # noqa: E402
     out = dict(checks=dict(toy=K.toy_checks(), quadrature=K.quadrature_checks(), identity=K.identity_check(), nfw_orbits=K.nfw_orbit_checks()))
     try:
-        out["checks"]["mw"] = K.mw_checks()
+        out["checks"]["mw"] = K.mw_checks(); out["checks"]["galpy_aa"] = K.galpy_aa_checks()
     except Exception as e:  # galpy missing
         out["checks"]["mw_error"] = repr(e)
+    p2 = os.path.join(RES, "halo_galpy2.json")  # written by check_halo.py --galpy2 in a galpy >= 2.0 environment
+    if os.path.exists(p2):
+        out["checks"]["galpy2"] = json.load(open(p2))
     fits = json.load(open(os.path.join(ROOT, "configs", "halo", "toy_fits.json")))
     r = torch.exp(torch.linspace(math.log(0.03), math.log(8.0), 160, dtype=F))
     tg = dict(nfw=C.NFW(2.0, 1.0), mw=C.MWPotential2014())
@@ -367,6 +370,12 @@ def main():
     add(f"NFW: orbit integrated for one radial period (from quadrature) returns to pericentre; radial-velocity and angle errors, max", max(K["nfw_orbits"]["vr_rel_max"], K["nfw_orbits"]["angle_err_max"]), 1e-8)
     if "mw" in K:
         add(f"MWPotential2014 against galpy at {K['mw']['n']} random points: potential and force, max relative difference", max(K["mw"]["pot_rel_max"], K["mw"]["force_rel_max"]), 1e-12)
+    if "galpy_aa" in K:
+        G_ = K["galpy_aa"]
+        add(f"galpy's actionAngleIsochrone applied to the toy's points ({G_['n']}) returns the actions, frequencies and angles put in, max error", max(G_["toy_actions"], G_["toy_freqs"], G_["toy_angles"]), 1e-10)
+        add(f"NFW quadrature against galpy's actionAngleSpherical ({G_['nfw_n']} tori): J_r and frequencies, max relative difference (galpy's integrals are good to ~1e-9)", max(G_["nfw_Jr"], G_["nfw_freqs"]), 1e-7)
+    if "galpy2" in K:
+        add(f"MWPotential2014 against galpy {K['galpy2']['galpy']}'s torch backend at {K['galpy2']['n']} points: potential and autograd force, max relative difference", max(K["galpy2"]["pot_vs_native"], K["galpy2"]["force_vs_native"]), 1e-12)
     p = os.path.join(RES, "exp_invariance.json")
     if os.path.exists(p):
         data["invariance"] = json.load(open(p))
