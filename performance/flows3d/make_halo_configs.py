@@ -61,6 +61,15 @@ def main():
             json.dump(dict(base, name=n2, model=dict(n_lin=2, n_blocks=8, width=128, gate_std=1e-3), adam=dict(steps=0),
                            init_from=n1, grow=True, lm=dict(lm, max_iters=20000, wall_hours=1.0, chunk=64)),
                       open(os.path.join(out, n2 + ".json"), "w"), indent=1)
+    # Diagnostics for the stage-1 stall (16 Nov): the same box and flow with (a) a smooth target, an isochrone that
+    # starts about as far from the toy as the NFW does (held-out 4e-2), and (b) the NFW from the spherical oscillator toy.
+    nfw_toy = dict(kind="isochrone", GM=round(fits["nfw"]["GM"], 6), b=round(fits["nfw"]["b"], 6))
+    for name, toy, target in (("halo_isoctl_w32_s0", nfw_toy, dict(kind="isochrone", GM=5.0, b=0.65)),
+                              ("halo_nfw_hotoy_w32_s0", dict(kind="spherical_ho", omega=1.0), dict(kind="nfw", a=2.0, normalize=1.0))):
+        json.dump(dict(toy=toy, data=BOX, target=target, seed=0, threads=24, device="cuda", name=name,
+                       model=dict(n_lin=2, n_blocks=8, width=32, gate_std=1e-3), adam=dict(steps=1000, lr=1e-3),
+                       lm=dict(invariance_beta=0.0, inv_angles=64, geodesic=True, every=10, ckpt_every=50, lam0=1e-3, plateau=[500, 0.01],
+                               max_iters=20000, wall_hours=0.75, chunk=128)), open(os.path.join(out, name + ".json"), "w"), indent=1)
     json.dump(fits, open(os.path.join(out, "toy_fits.json"), "w"), indent=1)
     print(json.dumps(fits, indent=1))
 
