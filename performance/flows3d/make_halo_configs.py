@@ -80,6 +80,18 @@ def main():
                        model=dict(n_lin=2, n_blocks=8, width=width, gate_std=1e-3), adam=dict(steps=0), init_from=f"halo_{key}_w{width}_s0",
                        lm=dict(invariance_beta=0.0, inv_angles=64, geodesic=True, every=10, ckpt_every=50, lam0=1e-3, plateau=[500, 0.01],
                                max_iters=20000, wall_hours=0.75, chunk=chunk)), open(os.path.join(out, name + ".json"), "w"), indent=1)
+    # Depth test (16 Nov): the same ~10,300 parameters as 16 layers x 128, spent on 32 layers x 64 or 64 layers x 32.
+    # Each continues a trained 16-layer, 32-wide flow: its layers are widened (new units off) and the extra layers are
+    # appended at the output end with near-zero gates, so training starts close to the source map. 1,024 angles.
+    for name, key, blocks, width, source, chunk in (("halo_nfw_d32w64_a1024_s0", "nfw", 16, 64, "halo_nfw_w32_a1024_s0", 16),
+                                                    ("halo_nfw_d64w32_a1024_s0", "nfw", 32, 32, "halo_nfw_w32_a1024_s0", 16),
+                                                    ("halo_mw_d32w64_a1024_s0", "mw", 16, 64, "halo_mw_w32_s0", 16)):
+        spec = dict(kind="nfw", a=2.0, normalize=1.0) if key == "nfw" else dict(kind="mw2014")
+        toy = dict(kind="isochrone", GM=round(fits[key]["GM"], 6), b=round(fits[key]["b"], 6))
+        json.dump(dict(toy=toy, data=dict(BOX, n_angles=1024), target=spec, seed=0, threads=24, device="cuda", name=name,
+                       model=dict(n_lin=2, n_blocks=blocks, width=width, gate_std=1e-3), adam=dict(steps=0), init_from=source, grow=True,
+                       lm=dict(invariance_beta=0.0, inv_angles=64, geodesic=True, every=10, ckpt_every=50, lam0=1e-3, plateau=[500, 0.01],
+                               max_iters=20000, wall_hours=1.0, chunk=chunk)), open(os.path.join(out, name + ".json"), "w"), indent=1)
     json.dump(fits, open(os.path.join(out, "toy_fits.json"), "w"), indent=1)
     print(json.dumps(fits, indent=1))
 
