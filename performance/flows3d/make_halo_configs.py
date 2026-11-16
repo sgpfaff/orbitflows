@@ -3,7 +3,8 @@
 One action box for both targets, in galpy's natural units (R0 = 8 kpc, v0 = 220 km/s, so 1 = 1760 kpc km/s):
 J_r 0.01-0.5, L 0.2-2, |cos i| <= 0.9. In the NFW that spans pericentres from 0.9 kpc to apocentres of 27 kpc. The toy
 isochrone (GM, b) is the least-squares fit to each target's rotation curve (angle-averaged radial force for the
-axisymmetric one) over 0.8-36 kpc. Stage 1 trains a 16-layer, 32-wide flow from scratch; stage 2 grows it to 128 wide."""
+axisymmetric one) over 0.8-36 kpc. Stage 1 trains a 16-layer, 32-wide flow from scratch; stage 2 grows it to 128 wide.
+configs/halo_geir holds stage 1 for CPUs under the same run names, so an H100 job can pick up its checkpoints."""
 import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 import json
@@ -53,6 +54,9 @@ def main():
             n1 = f"halo_{key}_w32_s{s}"
             json.dump(dict(base, name=n1, model=dict(n_lin=2, n_blocks=8, width=32, gate_std=1e-3), adam=dict(steps=1000, lr=1e-3),
                            lm=dict(lm, max_iters=20000, wall_hours=0.75, chunk=128)), open(os.path.join(out, n1 + ".json"), "w"), indent=1)
+            geir = os.path.join(HERE, "configs", "halo_geir"); os.makedirs(geir, exist_ok=True)  # same run on CPUs: the H100 job resumes it
+            json.dump(dict(base, name=n1, device="cpu", threads=4, model=dict(n_lin=2, n_blocks=8, width=32, gate_std=1e-3), adam=dict(steps=1000, lr=1e-3),
+                           lm=dict(lm, max_iters=20000, wall_hours=68.0, chunk=4, ckpt_every=10)), open(os.path.join(geir, n1 + ".json"), "w"), indent=1)
             n2 = f"halo_{key}_w128_s{s}"
             json.dump(dict(base, name=n2, model=dict(n_lin=2, n_blocks=8, width=128, gate_std=1e-3), adam=dict(steps=0),
                            init_from=n1, grow=True, lm=dict(lm, max_iters=20000, wall_hours=1.0, chunk=64)),
