@@ -279,7 +279,8 @@ def _run_record(name):
     ad = [r for r in raw if r["stage"] == "adam"]
     k = max(1, len(rows) // 600)  # thin long curves for the page
     rows_t = rows[::k] + ([rows[-1]] if (len(rows) - 1) % k else [])
-    rec = dict(name=name, width=c["model"]["width"], seed=c.get("seed", 0), n_params=C.n_params(m), steps=st["it"], h_total=st["t"] / 3600,
+    rec = dict(name=name, width=c["model"]["width"], layers=2 * c["model"]["n_blocks"], n_angles=c["data"]["n_angles"], seed=c.get("seed", 0),
+               n_params=C.n_params(m), steps=st["it"], h_total=st["t"] / 3600, t_min=[r["t"] / 60 for r in rows_t],
                grown=bool(c.get("grow")), it=[r["it"] for r in rows_t], energy=[r["eval_mean"] for r in rows_t], energy_max=[r["eval_max"] for r in rows_t],
                wander=[r.get("L_wander_median") for r in rows_t], wander_z=[r.get("Lz_wander_median") for r in rows_t],
                inv=[r.get("invariance_rms") for r in rows_t], final=fin, device=c.get("device", "cpu"),
@@ -354,7 +355,9 @@ def halo():
     diag = []
     extra = [("halo_isoctl_w32_s0", "iso", "smooth control: another isochrone"), ("halo_nfw_hotoy_w32_s0", "nfw", "NFW halo, oscillator toy"),
              ("halo_nfw_w32_a1024_s0", "nfw", "NFW halo, 1,024 angles"), ("halo_nfw_w128_a1024_s0", "nfw", "NFW halo, 1,024 angles"),
-             ("halo_mw_w128_a1024_s0", "mw", "MWPotential2014, 1,024 angles")]
+             ("halo_mw_w128_a1024_s0", "mw", "MWPotential2014, 1,024 angles"),
+             ("halo_nfw_d32w64_a1024_s0", "nfw", "NFW halo, 1,024 angles, deeper"), ("halo_nfw_d64w32_a1024_s0", "nfw", "NFW halo, 1,024 angles, deeper"),
+             ("halo_mw_d32w64_a1024_s0", "mw", "MWPotential2014, 1,024 angles, deeper")]
     names = [(r["name"], r["target"], dict(nfw="NFW halo", mw="MWPotential2014")[r["target"]]) for r in runs] + extra
     for name, key, label in names:
         jd = os.path.join(RES, name)
@@ -365,7 +368,8 @@ def halo():
         Jt, Jh, tht, _ = grids(c); thn = C.angle_samples(4096, 12345)
         with torch.no_grad():
             f = lambda J, th: float(C.residuals(m, C.aa_points(J, th), t).abs().mean())
-            rec = dict(name=name, target=key, label=label, width=c["model"]["width"], seed=c.get("seed", 0), n_angles=c["data"]["n_angles"], steps=st["it"],
+            rec = dict(name=name, target=key, label=label, width=c["model"]["width"], layers=2 * c["model"]["n_blocks"], seed=c.get("seed", 0),
+                       n_angles=c["data"]["n_angles"], steps=st["it"], source=c.get("init_from"),
                        toy=c["toy"].get("kind", "cartesian"), grown=bool(c.get("grow")), cont=bool(c.get("init_from")) and not c.get("grow"),
                        train=f(Jt, tht), new_angles=f(Jt, thn), new_tori=f(Jh, tht), held_out=f(Jh, thn))
         rp = os.path.join(jd, "result.json")
@@ -373,6 +377,30 @@ def halo():
             rec["lm_stop"] = json.load(open(rp))["lm_stop"]
         diag.append(rec)
     out["diag"] = diag
+    # depth test: flows of about 10,300 parameters in different shapes, all with 1,024 angles per torus, each continued
+    # from a trained smaller flow. For each: the curves against training time, and the held-out error by radius and height.
+    depth = []
+    r_edges, z_edges = [0, 2, 4, 8, 16, 40], [0, 0.3, 1, 3, 40]  # kpc
+    for name, key in (("halo_nfw_w128_a1024_s0", "nfw"), ("halo_nfw_d32w64_a1024_s0", "nfw"), ("halo_nfw_d64w32_a1024_s0", "nfw"),
+                      ("halo_mw_w128_a1024_s0", "mw"), ("halo_mw_d32w64_a1024_s0", "mw")):
+        rec = _run_record(name)
+        if not rec:
+            continue
+        jd = os.path.join(RES, name); c = json.load(open(os.path.join(jd, "config.json"))); st = torch.load(os.path.join(jd, "state.pt"), weights_only=False)
+        t = C.make_target(c["target"]); m = C.build_model(c["model"], c["toy"], seed=c.get("seed", 0)); m.load_state_dict(st["state"])
+        Jh = grids(c)[1]; aa = C.aa_points(Jh, C.angle_samples(4096, 12345))
+        with torch.no_grad():
+            xv = m(aa.reshape(-1, 6)); res = C.residuals(m, aa, t).abs().reshape(-1)
+            rk, zk = 8 * xv[:, :3].norm(dim=1), 8 * xv[:, 2].abs()
+            cut = lambda v, e: [dict(lo=e[i], hi=e[i + 1], frac=float(((v >= e[i]) & (v < e[i + 1])).double().mean()),
+                                     err=float(res[(v >= e[i]) & (v < e[i + 1])].mean())) for i in range(len(e) - 1)]
+            pt = res.view(len(Jh), -1).mean(1)
+            rec.update(target=key, source=c.get("init_from"), by_r=cut(rk, r_edges), by_z=cut(zk, z_edges), held_out=float(res.mean()),
+                       torus_min=float(pt.min()), torus_max=float(pt.max()),
+                       corr_Jr=float(torch.corrcoef(torch.stack([pt.log(), Jh[:, 0].log()]))[0, 1]),
+                       corr_L=float(torch.corrcoef(torch.stack([pt.log(), Jh[:, 1].log()]))[0, 1]))
+        depth.append(rec)
+    out["depth"] = depth
     return out
 
 
@@ -380,7 +408,7 @@ def main():
     t0 = time.perf_counter()
     data = dict(generated=time.strftime("%Y-%m-%d %H:%M"), sanity=sanity(), curves=curves(), generalisation=generalisation(),
                 quartic=quartic_portraits(), isochrone=isochrone_pictures(), sweep=sweep(), depth=depth(), width=width(), halo=halo())
-    G = [r["gpu_vs_cpu"] for r in data["depth"] + data["width"] + data["halo"]["runs"] if "gpu_vs_cpu" in r]
+    G = [r["gpu_vs_cpu"] for r in data["depth"] + data["width"] + data["halo"]["runs"] + data["halo"]["depth"] if "gpu_vs_cpu" in r]
     if G:
         data["sanity"].append(dict(group="GPU", what=f"H100-trained models ({len(G)}): held-out error on the H100 against a CPU re-evaluation, max relative difference",
                                     value=max(G), target="< 1e-10", ok=max(G) < 1e-10))

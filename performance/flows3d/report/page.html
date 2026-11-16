@@ -261,6 +261,14 @@ td.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums; white-space
     <div class="fig" id="halo-diag-fig"><h3>Why the halo runs stall: where each model's error is</h3>
       <div class="tablewrap" id="halo-diag"></div>
       <div class="cap" id="halo-diag-cap"></div></div>
+    <div class="fig" id="halo-depth-fig"><h3>Depth at equal parameters: about 10,300 parameters in three shapes</h3>
+      <div id="halo-depth-legend"></div>
+      <div class="grid2" id="fig-halo-depth"></div>
+      <div class="tablewrap" id="halo-depth-table"></div>
+      <div class="cap" id="halo-depth-cap"></div></div>
+    <div class="fig" id="halo-where-fig"><h3>Where the remaining error sits</h3>
+      <div class="grid2" id="fig-halo-where"></div>
+      <div class="cap" id="halo-where-cap"></div></div>
   </section>
 
   <section id="log">
@@ -343,7 +351,7 @@ const HL = DATA.halo || null;
     <li><b>The main finding so far:</b> the energy-variance loss barely constrains deformations along slow angle combinations. On the isochrone, the learned tori are energy-constant to ${fmt(d3.median(DATA.isochrone.per_torus.energy))} (median), but their angular momentum wanders ${Math.round(d3.median(DATA.isochrone.per_torus.wander) / d3.median(DATA.isochrone.per_torus.energy))}× more, in modes with k·Ω ≈ 0 (section 3). Training longer on the energy loss alone roughly halves it, and adding a small invariance term (β = 0.01) cuts it by a further ~20% at equal steps, while also lowering the energy error (section 5).</li>
     ${DATA.depth && DATA.depth.length ? `<li><b>Depth doesn’t help in 3D</b> (section 6). At about 2,600 parameters, 16 layers end lower than 32 in ${DEPTH_PAIRS.filter(p => p.a.eval_mean < p.c.eval_mean).length} of ${DEPTH_PAIRS.length} matched pairs, and every run stalls between ${sup(d3.min(DATA.depth, r => r.final.eval_mean))} and ${sup(d3.max(DATA.depth, r => r.final.eval_mean))}. Two seeds of the same flow differ by up to ${d3.max(DEPTH_SEEDS, p => p.ratio).toFixed(1)}×, as much as depth or β changes things. That points to where each run settles rather than to the architecture. On an H100, a 3D LM step is about 70× faster than on geir.</li>` : ''}
     ${wdGain(128) ? `<li><b>Width is the lever</b> (section 7). Growing the trained 32-wide flows to 128 wide, about 4× the parameters, lowers the held-out error ${Math.round(wdGain(128))}× to ${wdGrown(128).map(r => sup(r.final.eval_mean)).join(' and ')}; one of the two was still falling by ${Math.abs(100 * d3.min(wdGrown(128), r => r.last500_change)).toFixed(0)}% per 500 steps at its time limit. So the 1–4×10⁻⁴ stall was a capacity limit. Starting wide flows from scratch is unreliable: ${wdStuck.length} of ${WD.filter(r => !r.grown && r.width > 32).length} got stuck at about 9×10⁻³.</li>` : ''}
-    ${HL ? `<li><b>Next benchmark</b> (section 8): the same method from an exact isochrone toy onto an NFW halo and onto MWPotential2014, over orbits from 0.9 to 27 kpc. The new pieces pass their checks. ${HL.runs.length ? `The runs stall early, at ${sup(d3.min(HL.runs.filter(r => r.target === 'nfw'), r => r.final.eval_mean))} (NFW) and ${sup(d3.min(HL.runs.filter(r => r.target === 'mw'), r => r.final.eval_mean))} (MWPotential2014), and unlike on the isochrone a wider flow does not help: it fits the sampled angles better and new angles no better. The toy is not the cause; the cusped targets are harder. Four times as many angle samples per torus bring the best runs to ${HL.diag && HL.diag.some(r => r.n_angles > 256) ? HL.diag.filter(r => r.n_angles > 256 && r.width === 128).map(r => `${sup(r.held_out)} (${r.target === 'nfw' ? 'NFW' : 'MWPotential2014'})`).join(' and ') : 'lower errors'}.` : 'Training is starting.'} A separate note, <a href="https://claude.ai/artifact/QphiMromjg4HfouxumKjNN">Why Energy Suffices</a>, sets out why the energy loss is enough and where it is weak.</li>` : ''}</ul>`;
+    ${HL ? `<li><b>Next benchmark</b> (section 8): the same method from an exact isochrone toy onto an NFW halo and onto MWPotential2014, over orbits from 0.9 to 27 kpc. The new pieces pass their checks. ${HL.runs.length ? `The runs stall early, at ${sup(d3.min(HL.runs.filter(r => r.target === 'nfw'), r => r.final.eval_mean))} (NFW) and ${sup(d3.min(HL.runs.filter(r => r.target === 'mw'), r => r.final.eval_mean))} (MWPotential2014), and unlike on the isochrone a wider flow does not help: it fits the sampled angles better and new angles no better. The toy is not the cause; the cusped targets are harder. Four times as many angle samples per torus bring the best runs to ${HL.diag && HL.diag.some(r => r.n_angles > 256) ? HL.diag.filter(r => r.n_angles > 256 && r.width === 128).map(r => `${sup(r.held_out)} (${r.target === 'nfw' ? 'NFW' : 'MWPotential2014'})`).join(' and ') : 'lower errors'}.${HL.depth && HL.depth.some(r => r.layers > 16) ? ` At the same parameter count a deeper flow (32 layers × 64) does a little better: ${['nfw', 'mw'].map(t => { const r = HL.depth.find(q => q.target === t && q.layers === 32); return r ? `${sup(r.final.eval_mean)} (${t === 'nfw' ? 'NFW' : 'MWPotential2014'})` : null; }).filter(Boolean).join(' and ')}. Reshaping the flow does not close the gap to the isochrone.` : ''}` : 'Training is starting.'} A separate note, <a href="https://claude.ai/artifact/QphiMromjg4HfouxumKjNN">Why Energy Suffices</a>, sets out why the energy loss is enough and where it is weak.</li>` : ''}</ul>`;
 })();
 
 /* ---------- sanity table ---------- */
@@ -623,13 +631,13 @@ if (HL) {
 /* ---------- halo diagnostics ---------- */
 if (HL && HL.diag && HL.diag.length) {
   const D = HL.diag, cols = [['train', 'Training tori, training angles'], ['new_angles', 'Training tori, new angles'], ['new_tori', 'Held-out tori, training angles'], ['held_out', 'Held-out tori, new angles']];
-  const how = r => r.cont ? 'continued' : r.grown ? 'grown from 32' : 'from scratch';
+  const how = r => r.cont ? 'continued' : r.layers > 16 ? 'deepened from 16 × 32' : r.grown ? 'grown from 32' : 'from scratch';
   $('#halo-diag').innerHTML = `<table><thead><tr><th>Run</th><th>Flow</th><th>Start</th><th>Seed</th><th>Angles per torus</th><th>LM steps</th>${cols.map(c => `<th>${c[1]}</th>`).join('')}<th>New angles ÷ training angles</th></tr></thead><tbody>
-    ${D.map(r => `<tr><td>${r.label}</td><td>16 layers × ${r.width}</td><td>${how(r)}</td><td class="num">${r.seed}</td><td class="num">${r.n_angles.toLocaleString()}</td><td class="num">${r.steps.toLocaleString()}</td>
+    ${D.map(r => `<tr><td>${r.label}</td><td>${r.layers} layers × ${r.width}</td><td>${how(r)}</td><td class="num">${r.seed}</td><td class="num">${r.n_angles.toLocaleString()}</td><td class="num">${r.steps.toLocaleString()}</td>
       ${cols.map(([k]) => `<td class="num">${fmt(r[k])}</td>`).join('')}<td class="num"><b>${(r.new_angles / r.train).toFixed(1)}×</b></td></tr>`).join('')}</tbody></table>`;
   const g = (t, w, a) => D.filter(r => r.target === t && r.width === w && r.n_angles === a && r.toy === 'isochrone' && !r.cont);
   const m = (rows, k) => rows.length ? d3.mean(rows, r => r[k]) : null;
-  const n32 = g('nfw', 32, 256), n128 = g('nfw', 128, 256), ho = D.find(r => r.name === 'halo_nfw_hotoy_w32_s0'), ctl = D.find(r => r.name === 'halo_isoctl_w32_s0'), dense = D.filter(r => r.n_angles > 256);
+  const n32 = g('nfw', 32, 256), n128 = g('nfw', 128, 256), ho = D.find(r => r.name === 'halo_nfw_hotoy_w32_s0'), ctl = D.find(r => r.name === 'halo_isoctl_w32_s0'), dense = D.filter(r => r.n_angles > 256 && r.layers === 16);
   let t = `Mean relative energy error of each model on four sets of points: its training tori or the held-out tori, at the angles it was trained on or at 4,096 new ones. `;
   if (n32.length && n128.length) t += `<b>Width does not help here.</b> Growing the NFW flows from 32 to 128 wide lowers the error on the training points from ${sup(m(n32, 'train'))} to ${sup(m(n128, 'train'))}, but at new angles on the same tori it stays at ${sup(m(n128, 'new_angles'))}: the extra units fit the 256 sampled angles and nothing else. On the isochrone the same step gave 15× (section 7). `;
   if (ho) t += `<b>The toy is not the cause:</b> from the oscillator toy the NFW run ends at ${sup(ho.held_out)}, the same as from the isochrone toy. `;
@@ -639,6 +647,73 @@ if (HL && HL.diag && HL.diag.length) {
     : `<b>Next:</b> runs with 1,024 angles per torus are queued, to test whether angle sampling is what limits the wide flows.`;
   $('#halo-diag-cap').innerHTML = t;
 } else if ($('#halo-diag-fig')) $('#halo-diag-fig').remove();
+
+/* ---------- halo depth test ---------- */
+if (HL && HL.depth && HL.depth.length > 1) {
+  const HD = HL.depth, HDC = {16: '--s3', 32: '--s7', 64: '--s4'}, TN = {nfw: 'NFW halo', mw: 'MWPotential2014'}, TS = {nfw: 'NFW', mw: 'MWPotential2014'};
+  const shape = r => `${r.layers} layers × ${r.width} wide`, pct = v => `${Math.abs(100 * v).toFixed(0)}%`;
+  const ref = t => HD.find(r => r.target === t && r.layers === 16), deep = t => HD.filter(r => r.target === t && r.layers > 16);
+  const dg = n => (HL.diag || []).find(q => q.name === n) || {}, E = r => r.final.eval_mean;
+  const stop = r => r.lm_stop === 'plateau' ? 'plateau rule' : r.lm_stop === 'walltime' ? 'time limit' : (r.lm_stop || 'running');
+  $('#halo-depth-legend').innerHTML = legend([...new Set(HD.map(r => r.layers))].sort((x, y) => x - y).map(l => [tok(HDC[l]), shape(HD.find(r => r.layers === l))]));
+  chart('fig-halo-depth', el => {
+    const w = document.createDocumentFragment();
+    Object.keys(TN).forEach(tk => {
+      const d = document.createElement('div'); d.className = 'plot'; w.append(d);
+      const runs = HD.filter(r => r.target === tk); if (!runs.length) return;
+      const rows = runs.flatMap(r => r.it.map((it, i) => ({x: r.t_min[i], v: r.energy[i], l: r.layers, n: r.name, it, lab: shape(r)})));
+      const ends = runs.map(r => ({x: r.t_min[r.t_min.length - 1], v: r.final.eval_mean, l: r.layers})), top = d3.max(ends, e => e.v);
+      d.append(Plot.plot(base(el, {width: Math.max(260, (el.clientWidth - 12) / (el.clientWidth > 700 ? 2 : 1)), height: 270, marginLeft: 58, marginTop: 26,
+        x: {label: `training time on one H100, minutes (${TN[tk]}) →`, domain: [0, 62]},
+        y: {type: 'log', label: '↑ held-out energy error, mean (units of 10⁻³)', domain: logDom(rows.map(p => p.v), 1.15), ticks: tk === 'nfw' ? [1e-3, 1.5e-3, 2e-3, 2.5e-3] : [4e-3, 5e-3, 6e-3, 8e-3], tickFormat: v => (v * 1e3).toFixed(1)},
+        marks: [Plot.line(rows, {x: 'x', y: 'v', z: 'n', stroke: p => tok(HDC[p.l]), strokeWidth: 2, tip: true, title: p => `${TN[tk]}, ${p.lab}\n${p.x.toFixed(1)} min, LM step ${p.it}: ${fmt(p.v)}`}),
+          Plot.dot(ends, {x: 'x', y: 'v', r: 4, fill: p => tok(HDC[p.l]), stroke: tok('--surface') || tok('--bg'), strokeWidth: 2}),
+          Plot.text(ends.filter(p => p.v === top), {x: 'x', y: 'v', text: p => fmt(p.v), dy: -13, textAnchor: 'end', fill: tok('--ink-2'), fontSize: 11}),
+          Plot.text(ends.filter(p => p.v !== top), {x: 'x', y: 'v', text: p => fmt(p.v), dy: 15, textAnchor: 'end', fill: tok('--ink-2'), fontSize: 11})]})));
+    });
+    return w;
+  });
+  $('#halo-depth-table').innerHTML = `<table><thead><tr><th>Target</th><th>Flow</th><th>Parameters</th><th>Continued from</th><th>LM steps</th><th>Minutes</th><th>Seconds per step</th><th>Stopped by</th><th>Training points</th><th>Held-out</th><th>Against 16 × 128</th></tr></thead><tbody>
+    ${HD.map(r => { const q = ref(r.target), src = dg(r.source), d = dg(r.name);
+      return `<tr><td>${TN[r.target]}</td><td style="white-space:nowrap">${r.layers} layers × ${r.width}</td><td class="num">${r.n_params.toLocaleString()}</td><td>${src.layers ? `${src.layers} × ${src.width}, ${src.n_angles.toLocaleString()} angles (${fmt(src.held_out)})` : '–'}</td>
+        <td class="num">${r.steps.toLocaleString()}</td><td class="num">${(60 * r.h_total).toFixed(0)}</td><td class="num">${r.s_per_step.toFixed(2)}</td><td>${stop(r)}</td><td class="num">${fmt(d.train)}</td><td class="num"><b>${fmt(E(r))}</b></td>
+        <td class="num">${r === q ? '–' : (E(r) < E(q) ? '−' : '+') + pct(E(r) / E(q) - 1)}</td></tr>`; }).join('')}</tbody></table>`;
+  const n = ref('nfw'), m = ref('mw'), nd = deep('nfw'), md = deep('mw'), n32 = nd.find(r => r.layers === 32), n64 = nd.find(r => r.layers === 64), m32 = md.find(r => r.layers === 32);
+  const gap = HD.map(r => dg(r.name)).filter(q => q.train).map(q => q.new_angles / q.train);
+  let t = `Flows with the same number of parameters and 1,024 angles per torus, each continued from a trained flow (its held-out error in brackets). Held-out error against training time, with each run’s final value at its end; the panels have separate vertical scales. `;
+  if (n && n32 && m && m32) {
+    t += `<b>Depth helps a little.</b> For the NFW halo, 32 layers × 64 end at ${sup(E(n32))}, ${pct(E(n32) / E(n) - 1)} below the 16 × 128 flow (${sup(E(n))})${n64 ? `; 64 layers × 32 end at ${sup(E(n64))}, ${pct(E(n64) / E(n) - 1)} below it and worse than 32 layers` : ''}. For MWPotential2014, 32 × 64 reach ${sup(E(m32))} against ${sup(E(m))}, ${pct(E(m32) / E(m) - 1)} lower. `;
+    t += `The gain is a better fit to the training points (${sup(dg(n32.name).train)} against ${sup(dg(n.name).train)} for the NFW halo); the ratio of new-angle to training-angle error is ${d3.min(gap).toFixed(1)}–${d3.max(gap).toFixed(1)} for every flow here. A deeper step is not much dearer: ${n32.s_per_step.toFixed(1)} s for 32 × 64 against ${n.s_per_step.toFixed(1)} s for 16 × 128${n64 ? `, and ${n64.s_per_step.toFixed(1)} s for 64 × 32` : ''}. `;
+    t += `<b>It does not change the picture.</b> The best NFW error is still about ${Math.round(E(n32) / (wdGrown(128).length ? d3.min(wdGrown(128), r => r.final.eval_mean) : 1.1e-5) / 10) * 10} times what the same parameter count reached on the isochrone (section 7), and going from 32 to 64 layers made it worse, so reshaping a fixed budget is close to used up. `;
+    t += `<b>Caveats.</b> One seed each; in the 256-angle runs two seeds differed by up to 17% (NFW) and 2% (MWPotential2014), so the NFW difference is not far outside seed scatter. The runs did not start from the same model. The 16 × 128 NFW run was still falling by ${pct(n.last500_change)} per 500 steps at its time limit${HD.filter(r => r !== n).every(r => Math.abs(r.last500_change) < 0.01) ? '; every other run here had flattened to under 1% per 500 steps when it stopped' : ''}.`;
+  }
+  $('#halo-depth-cap').innerHTML = t;
+
+  /* where the error sits */
+  const bl = b => b.hi >= 40 ? `${b.lo}+` : `${b.lo}–${b.hi}`;
+  chart('fig-halo-where', el => {
+    const w = document.createDocumentFragment();
+    Object.keys(TN).forEach(tk => {
+      const d = document.createElement('div'); d.className = 'plot'; w.append(d);
+      const runs = HD.filter(r => r.target === tk); if (!runs.length) return;
+      const rows = runs.flatMap(r => r.by_r.map(b => ({x: bl(b), v: b.err, f: b.frac, l: r.layers, n: r.name, lab: shape(r)})));
+      d.append(Plot.plot(base(el, {width: Math.max(260, (el.clientWidth - 12) / (el.clientWidth > 700 ? 2 : 1)), height: 250, marginLeft: 58, marginTop: 26,
+        x: {type: 'point', label: `radius of the point on the learned torus, kpc (${TN[tk]}) →`, domain: runs[0].by_r.map(bl), padding: 0.4},
+        y: {type: 'log', label: '↑ held-out energy error, mean in bin (units of 10⁻³)', domain: logDom(rows.map(p => p.v), 1.25), ticks: tk === 'nfw' ? [0.7e-3, 1e-3, 1.5e-3, 2e-3, 3e-3] : [3e-3, 5e-3, 7e-3, 1e-2], tickFormat: v => +(v * 1e3).toFixed(1)},
+        marks: [Plot.line(rows, {x: 'x', y: 'v', z: 'n', stroke: p => tok(HDC[p.l]), strokeWidth: 2}),
+          Plot.dot(rows, {x: 'x', y: 'v', r: 4.5, fill: p => tok(HDC[p.l]), stroke: tok('--surface') || tok('--bg'), strokeWidth: 2, tip: true,
+            title: p => `${TN[tk]}, ${p.lab}\n${p.x} kpc: ${fmt(p.v)}\n${(100 * p.f).toFixed(0)}% of the points`})]})));
+    });
+    return w;
+  });
+  const best = t_ => d3.least(HD.filter(r => r.target === t_), E), bn = best('nfw'), bm = best('mw');
+  if (bn && bm) {
+    const share = r => r.by_r[0].frac * r.by_r[0].err / d3.sum(r.by_r, b => b.frac * b.err), mid = r => r.by_r[2].err, outer = r => d3.sum(r.by_r.slice(1), b => b.frac * b.err) / d3.sum(r.by_r.slice(1), b => b.frac);
+    const zr = r => d3.sum(r.by_z.slice(0, 2), b => b.frac * b.err) / d3.sum(r.by_z.slice(0, 2), b => b.frac) / r.by_z[3].err;
+    $('#halo-where-cap').innerHTML = `Held-out error of the same flows (colours as above), binned by where each point of the learned torus lies; hover for the share of points in each bin. <b>The centre is the hardest part and not the whole problem.</b> In the best NFW flow the error inside 2 kpc is ${(bn.by_r[0].err / mid(bn)).toFixed(1)}× that at 4–8 kpc, but only ${(100 * bn.by_r[0].frac).toFixed(0)}% of the points are there, so it is ${(100 * share(bn)).toFixed(0)}% of the mean, and the deeper flows are no better there than the wide one; outside 2 kpc the error is still ${sup(outer(bn))}. Across tori the NFW error tracks the radial action (correlation ${bn.corr_Jr.toFixed(2)} in the logs): eccentric tori are worst, by ${(bn.torus_max / bn.torus_min).toFixed(1)}× from best to worst. `
+      + `For MWPotential2014 the error falls steadily outwards, ${(bm.by_r[0].err / bm.by_r[4].err).toFixed(1)}× from inside 2 kpc to beyond 16 kpc, and is ${zr(bm).toFixed(1)}× higher within 1 kpc of the plane than above 3 kpc, which points at the bulge and disc. This fits the cusp explanation given above without proving it: no flow shape removes the central excess, and no shape is limited by it alone.`;
+  }
+} else { for (const id of ['#halo-depth-fig', '#halo-where-fig']) if ($(id)) $(id).remove(); }
 
 /* ---------- decisions ---------- */
 $('#decisions').innerHTML = [
@@ -654,6 +729,7 @@ $('#decisions').innerHTML = [
   ['Depth is not the lever in 3D (at ~2,600 parameters)', 'Unlike 1D, 32 layers did no better than 16 at equal parameters, and every run stalls at 1–4×10⁻⁴, with seed-to-seed scatter as large as the depth effect. This points to where the optimiser settles, not to depth. Proposed next, not started: test parameter count (wider flows) and growing models from trained smaller ones, on the H100.'],
   ['Widen by growing, not from scratch', 'Width, not depth or the optimiser, set the 1–4×10⁻⁴ stall: 4× the parameters gave about 15× lower error from the same starting map (section 7). Wide flows started from scratch got stuck in two of four runs, and grown ones in none of four, so models are trained narrow first and then widened with the new units switched off.'],
   ['Halo benchmark before more scaling', 'Before pushing the isochrone error lower, the same recipe is tested on realistic targets (section 8): an exact isochrone toy onto an NFW halo, which has an exact answer by quadrature, and onto MWPotential2014, which has none. Both use one action box in galpy’s natural units. The Milky Way potential is written directly in torch and equals galpy’s numpy evaluation to 4×10⁻¹⁴. galpy’s torch backend, the definition chosen earlier, agrees with it to 10⁻¹⁵ as of the 2.0.0b1 pre-release (the earlier development build was 10⁻⁸ off in the bulge), and can be switched in where that galpy is installed.'],
+  ['Generic flow first; symmetry-aware layers as a last resort', 'Decision (yours, 16 Nov): the aim of the 3D work is to see how far the generic approach goes, so layers that build in rotational symmetry are held back. Depth was tested first (section 8): at about 10,300 parameters and 1,024 angles per torus, 32 layers × 64 end about a quarter (NFW) and a sixth (MWPotential2014) below 16 layers × 128, and 64 layers × 32 do worse than 32. Depth helps a little and does not close the gap to the isochrone.'],
 ].map(([b, s]) => `<div><b>${b}</b><span>${s}</span></div>`).join('');
 
 renderAll();

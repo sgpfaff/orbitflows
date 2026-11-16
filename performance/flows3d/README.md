@@ -174,7 +174,7 @@ Checks (`check_halo.py`, re-run by `report/make_data.py`):
 
 `MWPotential2014` is written directly in torch. galpy's torch backend was chosen earlier as the definition of the 3D Milky Way target; as of the 2.0.0b1 pre-release (`pip install --pre galpy`, in `~/.venvs/galpy-2b1` on the laptop) it agrees with the native one to round-off, where the earlier development build was 1e-8 off in the bulge. `{"kind": "mw2014", "backend": "galpy"}` calls it instead. Its bulge has no forward-mode derivative, so `vmap(hessian)` fails on it; that only matters for LM with the invariance term (β > 0).
 
-### Results so far (16 Nov, 2.4 GPU-h in all)
+### Results so far (16 Nov, 5.1 GPU-h in all)
 
 Held-out energy error, 16 layers, β = 0, plateau rule. Jobs 1344003–06, 1344458–63, 1344551–53.
 
@@ -194,6 +194,23 @@ Held-out energy error, 16 layers, β = 0, plateau rule. Jobs 1344003–06, 13444
 - With 256 angles per torus, width only overfits: at 128 wide the error at new angles on the training tori is 4 times the error at the training angles. With 1,024 angles that gap closes (1.3 times) and width helps again, but the fit to the training points is itself poor (NFW 9.7e-4, MWPotential2014 3.8e-3 at 128 wide).
 - The toy is not the cause (oscillator and isochrone toys give the same). The target is: a smooth isochrone target in the same box trains 4 times better at 32 wide.
 - Working explanation, untested: the cusp (and the 0.28 kpc disc) put fine structure into the map near pericentre and disc crossings, and a generic 6D flow has to learn the rotational symmetry as well from the samples.
+
+### Depth at equal parameters (16 Nov, jobs 1344906–08, 2.7 GPU-h)
+
+Direction from Gabriel: symmetry-aware layers are a last resort; first see how far the generic flow goes. So depth was tested at a fixed budget of about 10,300 parameters, with 1,024 angles per torus. Each deeper flow continues a trained 16 × 32 flow (`init_from` + `grow` with a larger `n_blocks`: layers are widened and new ones appended near the identity). Configs `configs/halo/halo_{nfw,mw}_d*_a1024_s0.json`.
+
+| Target | Flow | LM steps | Minutes | s per step | Stopped by | Training points | Held-out |
+|---|---|---|---|---|---|---|---|
+| NFW | 16 layers × 128 | 1,930 | 45 | 1.4 | time limit | 9.7e-4 | 1.2e-3 |
+| NFW | 32 layers × 64 | 1,998 | 52 | 1.6 | plateau | 7.2e-4 | 8.9e-4 |
+| NFW | 64 layers × 32 | 1,384 | 47 | 2.0 | plateau | 8.9e-4 | 1.1e-3 |
+| MWPotential2014 | 16 layers × 128 | 833 | 21 | 1.5 | plateau | 3.8e-3 | 5.0e-3 |
+| MWPotential2014 | 32 layers × 64 | 2,349 | 60 | 1.5 | time limit | 2.9e-3 | 4.2e-3 |
+
+- Depth helps a little: 32 × 64 ends 24% (NFW) and 17% (MWPotential2014) below 16 × 128, through a better fit to the training points. The new-angle to training-angle ratio is 1.3–1.4 for every flow.
+- 64 × 32 is worse than 32 × 64, so reshaping a fixed budget is close to used up. The best NFW error is still about 80 times what 10,300 parameters reached on the isochrone.
+- Caveats: one seed each (seed scatter in the 256-angle runs was up to 17% for the NFW, 2% for MWPotential2014); the runs start from different models; the 16 × 128 NFW run was still falling by 4% per 500 steps at its time limit (every other run had flattened to under 1%).
+- Where the error is (held-out tori, 4,096 new angles): for the NFW the error inside 2 kpc is about 3 times the 4–8 kpc value, but only 1% of the points are there (3% of the mean error) and the deeper flows are no better there; across tori it tracks J_r (correlation 0.83–0.90 in the logs). For MWPotential2014 it falls about 4 times from inside 2 kpc to beyond 16 kpc and is about 1.7 times higher within 1 kpc of the plane than above 3 kpc. The centre and the disc are the hardest parts, but the error is not confined to them.
 
 ## Theory note: why constant energy is enough (16 Nov)
 
