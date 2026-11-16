@@ -211,8 +211,57 @@ td.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums; white-space
       <div class="cap" id="depth-speed-cap"></div></div>
   </section>
 
+  <section id="width">
+    <div class="eyebrow">7 · Width and growing, on H100s</div>
+    <h2 id="width-h2">Width is the lever</h2>
+    <div class="prose"><p>Section 6 left two explanations for the 1–4×10⁻⁴ stall: too few parameters, or an optimiser that settles early. This separates them. Same isochrone problem, 16 layers, energy loss alone (β = 0), with the layers made <b>64 and 128 wide</b> (5,172 and 10,292 parameters, against 2,612), two seeds each, all on one H100 per run with the plateau rule.</p>
+    <p>The runs were started two ways. <b>From scratch</b>, as in section 6. And <b>grown</b>: each trained 32-wide flow is widened, with the new units’ output weights set to zero, so the grown flow starts as exactly the same map as its source (checked: the two agree to the last digit, and the held-out error at step 0 is the source’s). Any improvement after that comes from the added units.</p></div>
+    <div class="fig"><h3>Held-out energy error against LM step</h3>
+      <div id="width-legend"></div>
+      <div class="grid2" id="fig-width"></div>
+      <div class="cap" id="width-fig-cap"></div></div>
+    <div class="fig"><h3>Final held-out error against parameter count</h3><div class="plot" id="fig-width-params"></div>
+      <div class="cap" id="width-params-cap"></div></div>
+    <div class="fig"><h3>Where each run stopped</h3><div class="tablewrap" id="width-table"></div>
+      <div class="cap" id="width-cap"></div></div>
+  </section>
+
+  <section id="halo">
+    <div class="eyebrow">8 · Next benchmark: realistic halos</div>
+    <h2>From an isochrone to an NFW halo and to MWPotential2014</h2>
+    <div class="prose"><p>The isochrone target has a closed-form answer, which made it a good first 3D problem and a poor stand-in for a galaxy. This benchmark keeps everything about the method and changes the two ends of the map. The <b>toy is now the isochrone itself</b>, through its exact action-angle map, so the flow starts from orbits that already look like rosettes. The <b>targets</b> are an NFW halo, which is still spherical and so still has an exact answer to score against, and MWPotential2014, which is flattened by its disc and has none.</p></div>
+    <div class="specs">
+      <div class="spec"><div class="tag" style="color:var(--s1)">NFW halo</div><dl>
+        <dt>Target</dt><dd><span class="eq">Φ(r) = −A ln(1 + r/a) / r</span>, with a = 16 kpc and A set so that v<sub>c</sub>(8 kpc) = 220 km/s. Its density rises as 1/r towards the centre, where the isochrone has a flat core.</dd>
+        <dt>Exact answer</dt><dd>A map onto NFW tori with the same (J<sub>r</sub>, L, L<sub>z</sub>). Not known in closed form.</dd>
+        <dt>Ground truth</dt><dd>H(J<sub>r</sub>, L) and both frequencies by quadrature of the radial motion, good to about 10⁻¹⁰ (checks below). On a true torus |x × v| = L.</dd>
+        <dt>Toy</dt><dd id="halo-toy-nfw"></dd></dl></div>
+      <div class="spec"><div class="tag" style="color:var(--s2)">MWPotential2014</div><dl>
+        <dt>Target</dt><dd>Bovy (2015), as in galpy: a power-law bulge with a cut-off, a Miyamoto–Nagai disc (a = 3 kpc, b = 0.28 kpc) and an NFW halo (a = 16 kpc), carrying 5%, 60% and 35% of v<sub>c</sub>² at 8 kpc. Axisymmetric, not spherical.</dd>
+        <dt>Exact answer</dt><dd>Tori with actions (J<sub>R</sub>, L<sub>z</sub>, J<sub>z</sub>). A toy torus (J<sub>r</sub>, L, L<sub>z</sub>) lands on the one with J<sub>R</sub> = J<sub>r</sub> and J<sub>z</sub> = L − |L<sub>z</sub>|. There may be resonant regions where no smooth map exists.</dd>
+        <dt>Ground truth</dt><dd>No exact H(J). What can be measured without one: held-out energy variance, the invariance residual, and L<sub>z</sub>, which is constant on every true torus (|L| is not).</dd>
+        <dt>Toy</dt><dd id="halo-toy-mw"></dd></dl></div>
+    </div>
+    <div class="extra"><b>Common to both.</b>
+      <span id="halo-box"></span>
+      <span>Flow and training: 16 layers 32 wide from scratch (1,000 Adam steps, then LM with the plateau rule), then grown to 128 wide, the recipe from section 7. Energy loss alone, two seeds.</span>
+      <span>Units are galpy’s natural ones: lengths in units of 8 kpc, velocities in units of 220 km/s, so an action of 1 is 1,760 kpc km/s.</span></div>
+    <div class="fig"><h3>Rotation curves: the two targets and the isochrones the flow starts from</h3>
+      <div id="halo-rot-legend"></div><div class="plot" id="fig-halo-rot"></div>
+      <div class="cap" id="halo-rot-cap"></div></div>
+    <div class="fig"><h3>Orbits at the corners of the action box (in the NFW halo)</h3><div class="tablewrap" id="halo-corners"></div>
+      <div class="cap">Exact, from the quadrature. The box runs from tight orbits inside 3 kpc to eccentric ones reaching 27 kpc, with pericentres down to 0.9 kpc.</div></div>
+    <div class="fig"><h3>Checks on the new pieces</h3><div class="tablewrap" id="halo-checks"></div>
+      <div class="cap" id="halo-checks-cap"></div></div>
+    <div class="fig" id="halo-runs-fig"><h3>Training so far</h3>
+      <div id="halo-legend"></div>
+      <div class="grid2" id="fig-halo"></div>
+      <div class="tablewrap" id="halo-table"></div>
+      <div class="cap" id="halo-cap"></div></div>
+  </section>
+
   <section id="log">
-    <div class="eyebrow">7 · Decisions</div>
+    <div class="eyebrow">9 · Decisions</div>
     <h2>Decision log</h2>
     <div class="log" id="decisions"></div>
   </section>
@@ -256,13 +305,25 @@ const DEPTH_PAIRS = [], DEPTH_SEEDS = [];  // 16 against 32 layers at the same b
 for (const b of [0, 0.01]) for (const s of [0, 1]) { const a = dpFind(16, b, s), c = dpFind(32, b, s); if (a && c) DEPTH_PAIRS.push({b, s, a: a.final, c: c.final}); }
 for (const d of [16, 32]) for (const b of [0, 0.01]) { const a = dpFind(d, b, 0), c = dpFind(d, b, 1); if (a && c) DEPTH_SEEDS.push({d, b, ratio: Math.max(a.final.eval_mean, c.final.eval_mean) / Math.min(a.final.eval_mean, c.final.eval_mean)}); }
 
+/* ---------- width and halo: lookups shared with the summary ---------- */
+const WD = DATA.width || [];
+const WDC = {32: '--s1', 64: '--s2', 128: '--s3'};
+const wdOK = WD.filter(r => r.final.eval_mean < 1e-3);                 // runs that did not get stuck
+const wdBase = WD.filter(r => r.width === 32), wdGrown = w => WD.filter(r => r.grown && r.width === w);
+const gmean = a => Math.exp(d3.mean(a, Math.log));
+const wdGain = w => wdBase.length && wdGrown(w).length ? gmean(wdBase.map(r => r.final.eval_mean)) / gmean(wdGrown(w).map(r => r.final.eval_mean)) : null;
+const wdStuck = WD.filter(r => !r.grown && r.width > 32 && r.final.eval_mean > 1e-3);
+const HL = DATA.halo || null;
+
 /* ---------- header, tiles, summary ---------- */
 (function () {
   const S = DATA.sanity, nok = S.filter(s => s.ok).length;
   $('#status').innerHTML = `<span><i class="dot" style="background:var(--good)"></i>${nok}/${S.length} sanity checks pass</span>` +
     `<span><i class="dot"></i>3 targets trained on the laptop</span>` +
     `<span><i class="dot" style="background:${DATA.invariance ? 'var(--good)' : 'var(--warn)'}"></i>invariance experiment ${DATA.invariance ? 'finished' : 'running'}</span>` +
-    (DATA.depth && DATA.depth.length ? `<span><i class="dot" style="background:var(--good)"></i>depth test finished (geir, then H100)</span>` : '');
+    (DATA.depth && DATA.depth.length ? `<span><i class="dot" style="background:var(--good)"></i>depth test finished (geir, then H100)</span>` : '') +
+    (WD.length ? `<span><i class="dot" style="background:var(--good)"></i>width test finished (H100)</span>` : '') +
+    (HL ? `<span><i class="dot" style="background:var(--warn)"></i>halo benchmark: ${HL.runs.length ? HL.runs.length + ' runs in progress' : 'set up, runs starting'}</span>` : '');
   const last = n => { const c = DATA.curves[n]; return c ? c[c.length - 1].ev : null; };
   const tiles = [
     ['Anisotropic oscillator', '2.6e-16', 'held-out error with linear shears only, by LM step 15: machine precision (the exact map is linear)'],
@@ -270,12 +331,16 @@ for (const d of [16, 32]) for (const b of [0, 0.01]) { const a = dpFind(d, b, 0)
     (() => { const b = (DATA.sweep || []).find(r => r.beta === 0.01); return b ? ['Isochrone', fmt(b.energy[b.energy.length - 1]), `held-out energy error after the β = 0.01 fine-tune (${b.it[b.it.length - 1].toLocaleString()} LM steps); |L| wander ${fmt(b.wander[b.wander.length - 1])}, down from 2.6×10⁻³`]
       : ['Isochrone', fmt(last('s3_isochrone')), 'held-out energy error after 200 LM steps, still falling; torus energies within 4×10⁻⁵ of exact']; })(),
   ];
+  if (wdGrown(128).length) { const b = d3.least(wdGrown(128), r => r.final.eval_mean);
+    tiles[2] = ['Isochrone', fmt(b.final.eval_mean), `held-out energy error of the best flow so far: 16 layers grown to 128 wide (${b.n_params.toLocaleString()} parameters); torus energies within ${fmt(b.final.torus_E_err_max)} of exact`]; }
   $('#tiles').innerHTML = tiles.map(([k, v, n]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join('');
   $('#summary').innerHTML = `<ul>
     <li><b>The 3D pipeline is exact where it should be.</b> Both toy maps are symplectic to round-off, the ground truth is good to 10⁻¹⁶, and with only linear layers the oscillator target is learned to machine precision.</li>
     <li><b>Nonlinear 3D targets train well but not yet to high precision</b> on laptop budgets (20–25 minutes): about 6×10⁻⁴ for both the separable quartic and the isochrone.</li>
     <li><b>The main finding so far:</b> the energy-variance loss barely constrains deformations along slow angle combinations. On the isochrone, the learned tori are energy-constant to ${fmt(d3.median(DATA.isochrone.per_torus.energy))} (median), but their angular momentum wanders ${Math.round(d3.median(DATA.isochrone.per_torus.wander) / d3.median(DATA.isochrone.per_torus.energy))}× more, in modes with k·Ω ≈ 0 (section 3). Training longer on the energy loss alone roughly halves it, and adding a small invariance term (β = 0.01) cuts it by a further ~20% at equal steps, while also lowering the energy error (section 5).</li>
-    ${DATA.depth && DATA.depth.length ? `<li><b>Depth doesn’t help in 3D</b> (section 6). At about 2,600 parameters, 16 layers end lower than 32 in ${DEPTH_PAIRS.filter(p => p.a.eval_mean < p.c.eval_mean).length} of ${DEPTH_PAIRS.length} matched pairs, and every run stalls between ${sup(d3.min(DATA.depth, r => r.final.eval_mean))} and ${sup(d3.max(DATA.depth, r => r.final.eval_mean))}. Two seeds of the same flow differ by up to ${d3.max(DEPTH_SEEDS, p => p.ratio).toFixed(1)}×, as much as depth or β changes things. That points to where each run settles rather than to the architecture. On an H100, a 3D LM step is about 70× faster than on geir.</li>` : ''}</ul>`;
+    ${DATA.depth && DATA.depth.length ? `<li><b>Depth doesn’t help in 3D</b> (section 6). At about 2,600 parameters, 16 layers end lower than 32 in ${DEPTH_PAIRS.filter(p => p.a.eval_mean < p.c.eval_mean).length} of ${DEPTH_PAIRS.length} matched pairs, and every run stalls between ${sup(d3.min(DATA.depth, r => r.final.eval_mean))} and ${sup(d3.max(DATA.depth, r => r.final.eval_mean))}. Two seeds of the same flow differ by up to ${d3.max(DEPTH_SEEDS, p => p.ratio).toFixed(1)}×, as much as depth or β changes things. That points to where each run settles rather than to the architecture. On an H100, a 3D LM step is about 70× faster than on geir.</li>` : ''}
+    ${wdGain(128) ? `<li><b>Width is the lever</b> (section 7). Growing the trained 32-wide flows to 128 wide, about 4× the parameters, lowers the held-out error ${Math.round(wdGain(128))}× to ${wdGrown(128).map(r => sup(r.final.eval_mean)).join(' and ')}; one of the two was still falling by ${Math.abs(100 * d3.min(wdGrown(128), r => r.last500_change)).toFixed(0)}% per 500 steps at its time limit. So the 1–4×10⁻⁴ stall was a capacity limit. Starting wide flows from scratch is unreliable: ${wdStuck.length} of ${WD.filter(r => !r.grown && r.width > 32).length} got stuck at about 9×10⁻³.</li>` : ''}
+    ${HL ? `<li><b>Next benchmark</b> (section 8): the same method from an exact isochrone toy onto an NFW halo and onto MWPotential2014, over orbits from 0.9 to 27 kpc. The new pieces pass their checks; ${HL.runs.length ? 'training is under way' : 'training is starting'}.</li>` : ''}</ul>`;
 })();
 
 /* ---------- sanity table ---------- */
@@ -447,6 +512,107 @@ if (DP.length) {
   $('#depth-speed-cap').innerHTML = `geir times are over each run’s last 100 steps there; geir is shared and was heavily loaded, so they vary. The H100 runs put all 125 tori in one batch (float64 throughout). For the energy loss alone, the benchmark job gave 0.13 s (16 layers) and 0.33 s (32 layers) per step on the H100, against 15–19 s on geir. The four H100 jobs used about ${d3.sum(G, r => r.h_gpu).toFixed(1)} GPU-hours in all.`;
 }
 
+/* ---------- width and growing ---------- */
+if (WD.length) {
+  const wLab = r => `${r.width} wide (${r.n_params.toLocaleString()} parameters)`;
+  const widths = [...new Set(WD.map(r => r.width))].sort((a, b) => a - b);
+  $('#width-h2').textContent = wdGain(128) ? `Width is the lever: 4× the parameters, ${Math.round(wdGain(128))}× lower error` : 'Width is the lever';
+  $('#width-legend').innerHTML = legend([...widths.map(w => [tok(WDC[w]), wLab(WD.find(r => r.width === w))]), [tok('--ink-2'), 'seed 1 dashed, seed 0 solid', true]]);
+  chart('fig-width', el => {
+    const w = document.createDocumentFragment();
+    [[false, 'from scratch'], [true, 'grown from the trained 32-wide flow']].forEach(([g, lab]) => {
+      const d = document.createElement('div'); d.className = 'plot'; w.append(d);
+      const rows = WD.filter(r => r.grown === g).flatMap(r => r.it.map((it, i) => ({x: it + 1, v: r.energy[i], w: r.width, s: r.seed, n: r.name})));
+      const line = s => Plot.line(rows.filter(p => p.s === s), {x: 'x', y: 'v', z: 'n', stroke: p => tok(WDC[p.w]), strokeWidth: 1.8, ...(s ? {strokeDasharray: '5,3'} : {}),
+        tip: true, title: p => `${p.w} wide, seed ${p.s}, ${lab}\nLM step ${p.x - 1}: ${fmt(p.v)}`});
+      d.append(Plot.plot(base(el, {width: Math.max(260, (el.clientWidth - 12) / (el.clientWidth > 700 ? 2 : 1)), height: 280, marginLeft: 58, marginTop: 26,
+        x: {type: 'log', label: `LM step + 1 (${lab}) →`, domain: [1, 3e4]}, y: {type: 'log', label: '↑ held-out energy error (mean)', domain: [8e-6, 3e-2], tickFormat: '.0e'},
+        marks: [line(0), line(1)]})));
+    });
+    return w;
+  });
+  const b1 = wdBase.find(r => r.seed === 1), fast = wdGrown(128).map(r => r['steps_to_5e-05']).filter(v => v != null);
+  $('#width-fig-cap').innerHTML = `Left: the 32-wide curves are the section-6 runs (on geir). Two of the four wider runs fall to about 9×10⁻³ within 500 steps and stay there; the other 128-wide run reaches ${sup(WD.find(r => r.name === 'width_w128_b0_s1').final.eval_mean)}. Right: every grown run starts at its source’s error and drops straight away${fast.length ? `; the 128-wide ones pass 5×10⁻⁵ within ${d3.max(fast).toLocaleString()} steps, a level no 32-wide run reached` : ''}.`;
+  chart('fig-width-params', el => {
+    const pts = WD.map(r => ({x: r.n_params, v: r.final.eval_mean, w: r.width, s: r.seed, g: r.grown, r}));
+    const b = gmean(wdBase.map(r => r.final.eval_mean)), n0 = wdBase[0].n_params;
+    const guide = [n0, 12000].map(n => ({x: n, v: b * (n0 / n) ** 2}));
+    const p = Plot.plot(base(el, {height: 320, marginLeft: 58, marginTop: 26,
+      x: {type: 'log', label: 'parameters →', domain: [2200, 12500], ticks: [2612, 5172, 10292], tickFormat: d => d.toLocaleString()},
+      y: {type: 'log', label: '↑ final held-out energy error (mean)', domain: [7e-6, 2e-2], ticks: [1e-5, 1e-4, 1e-3, 1e-2], tickFormat: '.0e'},
+      marks: [Plot.line(guide, {x: 'x', y: 'v', stroke: tok('--muted'), strokeDasharray: '4,4', strokeWidth: 1.5}),
+        Plot.dot(pts, {x: 'x', y: 'v', r: 6, stroke: d => tok(WDC[d.w]), strokeWidth: 2, fill: d => d.g ? tok(WDC[d.w]) : tok('--surface'), tip: true,
+          title: d => `${d.w} wide, seed ${d.s}, ${d.g ? 'grown' : 'from scratch'}\n${fmt(d.v)} after ${d.r.steps.toLocaleString()} LM steps`})]}));
+    const w = document.createElement('div');
+    w.innerHTML = `<div class="legend"><span><i style="background:${tok('--ink-2')};height:10px;width:10px;border-radius:50%"></i>filled: grown from 32 wide</span><span><i style="background:transparent;border:2px solid ${tok('--ink-2')};height:10px;width:10px;border-radius:50%;box-sizing:border-box"></i>open: from scratch</span><span><i class="dash" style="background:${tok('--muted')};color:${tok('--muted')}"></i>guide: error ∝ parameters⁻²</span></div>`;
+    w.append(p); return w;
+  });
+  $('#width-params-cap').innerHTML = `Colours as above. Growing from 32 to 64 wide lowers the error ${wdGain(64).toFixed(1)}×, and to 128 wide ${wdGain(128).toFixed(1)}× (geometric means over the two seeds), close to the inverse square of the parameter count. That slope rests on two widths and two seeds, and the 128-wide runs had not finished, so it is a lower bound on the gain there. The two open points near 9×10⁻³ are the stuck runs.`;
+  const keys = [['eval_mean', 'Energy error, mean'], ['eval_max', 'Energy error, worst torus'], ['L_wander_median', '|L| wander, median torus'], ['invariance_rms', 'Invariance residual'],
+    ['torus_E_err_max', 'Torus energy vs exact H(J), max'], ['freq_err_max', 'Frequencies vs exact, max']];
+  const best = k => d3.min(WD, r => r.final[k]);
+  const stop = r => r.lm_stop === 'plateau' ? 'plateau rule' : r.lm_stop === 'walltime' ? `time limit, still falling ${Math.abs(100 * r.last500_change).toFixed(1)}% per 500 steps` : r.lm_stop === 'max_iters' ? 'step limit (20,000)'
+    : r.width === 32 ? 'stopped by hand, flat (section 6)' : 'cancelled, stuck';
+  $('#width-table').innerHTML = `<table><thead><tr><th>Flow</th><th>Start</th><th>Seed</th><th>LM steps</th><th>How it stopped</th><th>H100 time</th>${keys.map(k => `<th>${k[1]}</th>`).join('')}</tr></thead><tbody>
+    ${WD.map(r => `<tr><td>16 layers × ${r.width} <span class="mono">(${r.n_params.toLocaleString()})</span></td><td>${r.grown ? 'grown' : 'scratch'}</td><td class="num">${r.seed}</td><td class="num">${r.steps.toLocaleString()}</td><td>${stop(r)}</td><td class="num">${r.gpu_min ? Math.round(r.gpu_min) + ' min' : 'geir'}</td>
+      ${keys.map(([k]) => `<td class="num">${r.final[k] === best(k) ? '<b>' + fmt(r.final[k]) + '</b>' : fmt(r.final[k])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  const st = wdStuck[0];
+  $('#width-cap').innerHTML = `Bold marks the best in each column; every model was re-evaluated on the CPU from its checkpoint. The eight H100 jobs used ${(d3.sum(WD, r => r.gpu_min || 0) / 60).toFixed(1)} GPU-hours. <b>The stuck runs</b> share one signature: held-out error ${wdStuck.map(r => sup(r.final.eval_mean)).join(' and ')}, and |L| wandering by ${st ? st.final.L_wander_median.toFixed(2) : '–'} of J<sub>r</sub> + L on the median torus, already in place by LM step 500. So they found the same wrong arrangement of tori, not a slow path to the right one. What decides it is not known: the state after Adam does not predict it${b1 && b1.adam_end ? ` (the 32-wide seed-1 run left Adam with the same |L| wander, ${b1.adam_end.wander.toFixed(2)}, and recovered)` : ''}. Growing from a trained narrow flow avoids it in all four runs. <b>Caveat on the plateau rule:</b> the 64-wide run from scratch stopped at 2,753 steps, while the grown 64-wide runs needed over 10,000 steps to pass 5×10⁻⁵, so a 1% drop over 500 steps may stop wide flows early.`;
+}
+
+/* ---------- halo benchmark ---------- */
+if (HL) {
+  const toyTxt = k => `The isochrone’s exact action-angle map, with GM = ${HL.fits[k].GM.toFixed(2)} and b = ${(8 * HL.fits[k].b).toFixed(1)} kpc: the least-squares fit to this target’s rotation curve over ${HL.r_fit_kpc[0].toFixed(1)}–${HL.r_fit_kpc[1].toFixed(0)} kpc.`;
+  $('#halo-toy-nfw').innerHTML = toyTxt('nfw'); $('#halo-toy-mw').innerHTML = toyTxt('mw') + ' The fit is to the direction-averaged radial force.';
+  const B = HL.box, A = 1760;
+  $('#halo-box').innerHTML = `Training tori: one action box for both targets, ${B.n_per_axis} per axis. J<sub>r</sub> from ${B.Jr[0]} to ${B.Jr[1]} (${Math.round(A * B.Jr[0])}–${Math.round(A * B.Jr[1])} kpc km/s) and L from ${B.L[0]} to ${B.L[1]} (${Math.round(A * B.L[0])}–${(A * B.L[1]).toLocaleString()} kpc km/s), both geometric; cos i from −${B.cosi_max} to ${B.cosi_max}, so orbital planes from 26° off the disc plane to polar, prograde and retrograde. ${B.n_per_axis ** 3} tori × ${B.n_angles} angles; held-out tori halfway between them, as before.`;
+  const R = HL.rotation, ser = [['nfw', '--s1', 'NFW halo', false], ['nfw_toy', '--s1', 'toy isochrone for the NFW halo', true], ['mw', '--s2', 'MWPotential2014 (direction-averaged)', false], ['mw_toy', '--s2', 'toy isochrone for MWPotential2014', true]];
+  $('#halo-rot-legend').innerHTML = legend(ser.map(([k, c, l, d]) => [tok(c), l, d]));
+  const span = [d3.min(HL.corners, c => c.rp_kpc), d3.max(HL.corners, c => c.ra_kpc)];
+  chart('fig-halo-rot', el => {
+    const rows = ser.flatMap(([k, c, l, d]) => R.r_kpc.map((r, i) => ({r, v: R[k][i], k, c, l, d})));
+    return Plot.plot(base(el, {height: 320, marginLeft: 52,
+      x: {type: 'log', label: 'radius (kpc) →', domain: [0.25, 64], ticks: [0.3, 1, 3, 10, 30], tickFormat: d => String(d)}, y: {label: '↑ circular speed (km/s)', domain: [0, 290]},
+      marks: [Plot.rect([{x1: span[0], x2: span[1]}], {x1: 'x1', x2: 'x2', y1: 0, y2: 290, fill: tok('--accent-soft'), fillOpacity: .6}),
+        Plot.text([{x: Math.sqrt(span[0] * span[1]), y: 278}], {x: 'x', y: 'y', text: () => 'radii reached by the training orbits', fill: tok('--ink-2'), fontSize: 11}),
+        ...ser.map(([k, c, l, d]) => Plot.line(rows.filter(p => p.k === k), {x: 'r', y: 'v', stroke: tok(c), strokeWidth: 2, ...(d ? {strokeDasharray: '5,3'} : {}), tip: true, title: p => `${p.l}\n${p.r.toFixed(1)} kpc: ${p.v.toFixed(0)} km/s`}))]}));
+  });
+  $('#halo-rot-cap').innerHTML = `The isochrone cannot follow a flat rotation curve: it has a core where the targets are cusped, and it falls off beyond its peak. The best fits miss by ${Math.round(50 * HL.fits.nfw.rms_ln_vc2)}% (NFW) and ${Math.round(50 * HL.fits.mw.rms_ln_vc2)}% (MWPotential2014) rms in circular speed over the shaded range. That gap is what the flow has to make up. For MWPotential2014 the curve shown is averaged over directions; the disc makes the true force depend on direction as well.`;
+  $('#halo-corners').innerHTML = `<table><thead><tr><th>J<sub>r</sub> (kpc km/s)</th><th>L (kpc km/s)</th><th>Pericentre</th><th>Apocentre</th><th>Radial period</th></tr></thead><tbody>
+    ${HL.corners.map(c => `<tr><td class="num">${Math.round(A * c.Jr)}</td><td class="num">${Math.round(A * c.L).toLocaleString()}</td><td class="num">${c.rp_kpc.toFixed(1)} kpc</td><td class="num">${c.ra_kpc.toFixed(1)} kpc</td><td class="num">${Math.round(c.period_myr)} Myr</td></tr>`).join('')}</tbody></table>`;
+  const hs = DATA.sanity.filter(s => s.group === 'Halo');
+  $('#halo-checks').innerHTML = `<table><thead><tr><th>Check</th><th>Value</th><th>Expected</th><th></th></tr></thead><tbody>
+    ${hs.map(s => `<tr><td>${s.what}</td><td class="num">${sup(s.value)}</td><td class="num">${s.target}</td><td><span class="chip ${s.ok ? 'ok' : 'no'}">${s.ok ? 'PASS' : 'FAIL'}</span></td></tr>`).join('')}</tbody></table>`;
+  $('#halo-checks-cap').innerHTML = `Re-run each time this page is built (they also appear in section 1). The first four show the isochrone toy is an exact action-angle map; the next three that the NFW ground truth is good to about 10⁻¹⁰; the last that the potential written here is galpy’s. <b>One difference to flag:</b> the comparison is with galpy’s standard (numpy) evaluation. galpy’s torch backend, chosen earlier as the definition of the 3D Milky Way target, differs from it by up to 1×10⁻⁸ in potential and 9×10⁻⁸ in force, all in the bulge term. That is about a thousand times below the errors expected here; the trained models will be re-evaluated against the torch backend as well.`;
+  const HR = HL.runs, HC = {32: '--s1', 128: '--s3'}, TN = {nfw: 'NFW halo', mw: 'MWPotential2014'};
+  if (!HR.length) {
+    $('#fig-halo').remove(); $('#halo-table').remove(); $('#halo-legend').remove();
+    $('#halo-cap').innerHTML = 'No results yet. The four first-stage runs (32 wide, both targets, two seeds) were submitted to H100s on 16 Nov; the 128-wide stage follows from whichever of them train cleanly.';
+  } else {
+    $('#halo-legend').innerHTML = legend([...[...new Set(HR.map(r => r.width))].sort((a, b) => a - b).map(w => [tok(HC[w]), `16 layers × ${w} wide`]), [tok('--ink-2'), 'seed 1 dashed, seed 0 solid', true]]);
+    chart('fig-halo', el => {
+      const w = document.createDocumentFragment();
+      Object.keys(TN).forEach(tk => {
+        const d = document.createElement('div'); d.className = 'plot'; w.append(d);
+        const rows = HR.filter(r => r.target === tk).flatMap(r => r.it.map((it, i) => ({x: it + 1, v: r.energy[i], w: r.width, s: r.seed, n: r.name})));
+        if (!rows.length) return;
+        const line = s => Plot.line(rows.filter(p => p.s === s), {x: 'x', y: 'v', z: 'n', stroke: p => tok(HC[p.w]), strokeWidth: 1.8, ...(s ? {strokeDasharray: '5,3'} : {}),
+          tip: true, title: p => `${TN[tk]}, ${p.w} wide, seed ${p.s}\nLM step ${p.x - 1}: ${fmt(p.v)}`});
+        d.append(Plot.plot(base(el, {width: Math.max(260, (el.clientWidth - 12) / (el.clientWidth > 700 ? 2 : 1)), height: 260, marginLeft: 58, marginTop: 26,
+          x: {type: 'log', label: `LM step + 1 (${TN[tk]}) →`, domain: [1, Math.max(100, d3.max(rows, r => r.x) * 1.2)]},
+          y: {type: 'log', label: '↑ held-out energy error (mean)', domain: logDom(HR.flatMap(r => r.energy), 1.3), tickFormat: '.0e'}, marks: [line(0), line(1)]})));
+      });
+      return w;
+    });
+    const hk = [['eval_mean', 'Energy error, mean'], ['eval_max', 'Energy error, worst torus'], ['invariance_rms', 'Invariance residual'], ['L_wander_median', '|L| wander, median'], ['Lz_wander_median', 'L<sub>z</sub> wander, median'],
+      ['torus_E_err_max', 'Torus energy vs exact, max'], ['freq_err_max', 'Frequencies vs exact, max']];
+    $('#halo-table').innerHTML = `<table><thead><tr><th>Target</th><th>Flow</th><th>Seed</th><th>LM steps</th><th>Status</th>${hk.map(k => `<th>${k[1]}</th>`).join('')}</tr></thead><tbody>
+      ${HR.map(r => `<tr><td>${TN[r.target]}</td><td>16 layers × ${r.width}${r.grown ? ', grown' : ''}</td><td class="num">${r.seed}</td><td class="num">${r.steps.toLocaleString()}</td><td>${r.lm_stop ? (r.lm_stop === 'plateau' ? 'plateau rule' : r.lm_stop === 'walltime' ? 'time limit' : r.lm_stop) : 'running'}</td>
+        ${hk.map(([k]) => `<td class="num">${fmt(r.final[k])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    $('#halo-cap').innerHTML = `Held-out measures as in sections 6 and 7, each model re-evaluated on the CPU from its latest checkpoint. For the NFW halo, |L| wander is an error and L<sub>z</sub> wander is not (a spherical potential leaves the tilt of a torus free). For MWPotential2014 it is the other way round: L<sub>z</sub> is conserved on true tori and |L| is not, and there is no exact H(J) to compare with. ${HR.some(r => !r.lm_stop) ? 'Runs marked “running” are snapshots.' : ''}`;
+  }
+}
+
 /* ---------- decisions ---------- */
 $('#decisions').innerHTML = [
   ['New 6D layers, not the repo’s conditioners', 'In 3D a shear q ← q + f(p) is symplectic only if f is a gradient. The repo’s conditioners output independent components with per-component gates, which breaks that. The flow here uses SympNet gradient shears with a single gate, plus linear symmetric shears that can represent any linear symplectic map exactly.'],
@@ -459,6 +625,8 @@ $('#decisions').innerHTML = [
   ['Weight it small: β ≈ 0.01', 'Equal weights (β = 1, laptop) and β = 0.1 (geir) let the invariance term dominate and make the energy error and the wander worse. At β = 0.01, close to the β ≈ 1/64 that balances the two terms, every held-out measure improves on the control at equal steps (section 5). Next: train with β = 0.01 from the start rather than as a fine-tune, and make the weighted step cheaper.'],
   ['Run 3D training on the H100s', 'With all 125 tori in one batch, an LM step with the invariance term takes about 1 s for the 16-layer flow on one H100, against 80–90 s on geir (section 6); GPU and CPU results agree to 10⁻¹³. Jobs resume from checkpoints and stop on their own at a plateau, so a run costs minutes to an hour of GPU time rather than a day of a shared machine.'],
   ['Depth is not the lever in 3D (at ~2,600 parameters)', 'Unlike 1D, 32 layers did no better than 16 at equal parameters, and every run stalls at 1–4×10⁻⁴, with seed-to-seed scatter as large as the depth effect. This points to where the optimiser settles, not to depth. Proposed next, not started: test parameter count (wider flows) and growing models from trained smaller ones, on the H100.'],
+  ['Widen by growing, not from scratch', 'Width, not depth or the optimiser, set the 1–4×10⁻⁴ stall: 4× the parameters gave about 15× lower error from the same starting map (section 7). Wide flows started from scratch got stuck in two of four runs, and grown ones in none of four, so models are trained narrow first and then widened with the new units switched off.'],
+  ['Halo benchmark before more scaling', 'Before pushing the isochrone error lower, the same recipe is tested on realistic targets (section 8): an exact isochrone toy onto an NFW halo, which has an exact answer by quadrature, and onto MWPotential2014, which has none. Both use one action box in galpy’s natural units. The Milky Way potential is written directly in torch and equals galpy’s numpy evaluation to 4×10⁻¹⁴; galpy’s torch backend, the definition chosen earlier, differs by up to 10⁻⁸ and can be switched in where a development galpy is installed.'],
 ].map(([b, s]) => `<div><b>${b}</b><span>${s}</span></div>`).join('');
 
 renderAll();

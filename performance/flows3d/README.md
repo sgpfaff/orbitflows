@@ -147,3 +147,27 @@ python run3d.py configs/s3_isochrone.json          # spherical: isochrone target
 - Grown 128 wide: torus-mean E against exact H(J) ≤ 2.8e-6, frequencies ≤ 3.5e-5, |L| wander 2e-5.
 - 2 of 4 wide runs from scratch fell into the same wrong solution (held-out 8.7e-3, |L| wander 0.26 median / 0.447 max, training loss 2-5e-5) within the first 500 LM steps. The |L| wander after Adam does not predict it: 5 of 8 depth runs left Adam at 0.28-0.29 and all escaped. Growing from a trained narrow flow avoids the problem.
 - Grown runs need ~10-20k LM steps (0.14 s/step at 64 wide, 0.36 s/step at 128 wide on an H100).
+
+## Halo benchmark: isochrone toy to an NFW halo and to MWPotential2014 (set up 16 Nov)
+
+The isochrone target has a closed-form answer. This benchmark tests the same recipe on realistic targets.
+
+- **Toy:** `IsochroneToy`, the isochrone's exact action-angle map in (J_r, L, L_z), with (GM, b) fitted to each target's rotation curve over 0.8–36 kpc (`make_halo_configs.py`). The fits miss by 14–18% rms in circular speed: the isochrone has a core and falls off, the targets are cusped and flat.
+- **Targets:** `NFW` (a = 16 kpc, v_c(8 kpc) = 220 km/s; spherical, so H(J) and the frequencies come from quadrature in `SphericalPotential`) and `MWPotential2014` (Bovy 2015, axisymmetric, no exact H(J)). Units are galpy's natural ones (8 kpc, 220 km/s).
+- **Action box, the same for both:** J_r 0.01–0.5, L 0.2–2 (18–880 and 352–3,520 kpc km/s), |cos i| ≤ 0.9, 5 per axis. In the NFW that spans pericentres from 0.9 kpc to apocentres of 27 kpc.
+- **Training:** 16 layers × 32 from scratch, then grown to 128 wide (`configs/halo`), β = 0, two seeds, plateau rule.
+- **What can be measured for MWPotential2014:** held-out energy variance, the invariance residual and the L_z wander (L_z is conserved on true tori; |L| is not). For a spherical target it is the other way round: |L| is constant on a learned torus but L_z need not be, because the 3-tori are degenerate (Ω_3 = 0).
+
+Checks (`check_halo.py`, re-run by `report/make_data.py`):
+
+| Check | Value |
+|---|---|
+| Isochrone toy: Jacobian symplectic, energy = H(J), flow tangent at the exact frequencies | 2e-12, 2e-14, 1.5e-14 |
+| Isochrone toy onto the same isochrone, flow off (identity is exact): held-out error | 4e-16 |
+| Quadrature H(J) and frequencies on the isochrone against the closed form | 1e-14, 8e-11 |
+| NFW frequencies against orbit integration over one radial period | 9e-11 |
+| `MWPotential2014` against galpy (numpy path), potential and force | 4e-14 |
+
+`MWPotential2014` is written directly in torch. galpy's torch backend, chosen earlier as the definition of the 3D Milky Way target, differs from it by up to 1e-8 in potential and 9e-8 in force (bulge term); `{"kind": "mw2014", "backend": "galpy"}` calls it instead where a development galpy is installed.
+
+Runs: stage 1 submitted to H100s on 16 Nov (jobs 1344003–06).

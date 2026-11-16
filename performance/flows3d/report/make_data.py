@@ -259,14 +259,114 @@ def depth():
     return out
 
 
+def _run_record(name):
+    """One run3d result folder: LM curves from the log and a CPU re-evaluation of the final model."""
+    sys.path.insert(0, ROOT); import run3d  # noqa: E402
+    jd = os.path.join(RES, name)
+    if not os.path.exists(os.path.join(jd, "state.pt")):
+        return None
+    raw = [json.loads(l) for l in open(os.path.join(jd, "log.jsonl")) if l.strip()]
+    seen, rows = set(), []
+    for r in raw:
+        if r["stage"] == "lm" and r["it"] not in seen:
+            seen.add(r["it"]); rows.append(r)
+    c = json.load(open(os.path.join(jd, "config.json"))); st = torch.load(os.path.join(jd, "state.pt"), weights_only=False)
+    t = C.make_target(c["target"]); m = C.build_model(c["model"], c["toy"], seed=c.get("seed", 0)); m.load_state_dict(st["state"])
+    ev = C.Evaluator(t, J=grids(c)[1], n_angles=c["data"].get("n_eval_angles", 1024))
+    fin = ev.quick(m); fin.update(run3d.spherical_diagnostics(m, ev.target, ev.J, ev.th))
+    if ev.exact:
+        af = ev.action_freq(m); fin.update(torus_E_err_max=max(af["rel_E_err"]), freq_err_max=max(af["rel_freq_err"]))
+    ad = [r for r in raw if r["stage"] == "adam"]
+    k = max(1, len(rows) // 600)  # thin long curves for the page
+    rows_t = rows[::k] + ([rows[-1]] if (len(rows) - 1) % k else [])
+    rec = dict(name=name, width=c["model"]["width"], seed=c.get("seed", 0), n_params=C.n_params(m), steps=st["it"], h_total=st["t"] / 3600,
+               grown=bool(c.get("grow")), it=[r["it"] for r in rows_t], energy=[r["eval_mean"] for r in rows_t], energy_max=[r["eval_max"] for r in rows_t],
+               wander=[r.get("L_wander_median") for r in rows_t], wander_z=[r.get("Lz_wander_median") for r in rows_t],
+               inv=[r.get("invariance_rms") for r in rows_t], final=fin, device=c.get("device", "cpu"),
+               adam_end=(dict(energy=ad[-1]["eval_mean"], wander=ad[-1].get("L_wander_median")) if ad else None),
+               lm500=next((dict(energy=r["eval_mean"], wander=r.get("L_wander_median"), wander_max=r.get("L_wander_max")) for r in rows if r["it"] >= 500), None))
+    for thr in (1e-4, 5e-5, 2e-5):
+        rec[f"steps_to_{thr:g}"] = next((r["it"] for r in rows if r["eval_mean"] < thr), None)
+    if len(rows) > 1:
+        j = next(i for i, r in enumerate(rows) if r["it"] >= rows[-1]["it"] - 500)
+        rec["last500_change"] = rows[-1]["eval_mean"] / rows[j]["eval_mean"] - 1
+        rec["s_per_step"] = (rows[-1]["t"] - rows[0]["t"]) / max(rows[-1]["it"] - rows[0]["it"], 1)
+    rp = os.path.join(jd, "result.json")
+    if os.path.exists(rp):
+        r = json.load(open(rp)); rec["lm_stop"] = r["lm_stop"]
+        rec["gpu_vs_cpu"] = abs(r["final"]["eval_mean"] / fin["eval_mean"] - 1)
+    return rec
+
+
+def width():
+    """Width test (configs/width_h100, configs/grow_h100): 16 layers, beta = 0, 64 and 128 wide, from scratch and grown
+    from the trained 32-wide flows, with those 32-wide runs as the baseline."""
+    names = [f"depth_d16_b0_s{s}" for s in (0, 1)] + [f"width_w{w}_b0_s{s}" for w in (64, 128) for s in (0, 1)] + \
+            [f"grow_w{w}_from_d16_b0_s{s}" for w in (64, 128) for s in (0, 1)]
+    out = [r for r in (_run_record(n) for n in names) if r]
+    acct = {"width_w64_b0_s0": 7.35, "width_w64_b0_s1": 9.87, "width_w128_b0_s0": 12.7, "width_w128_b0_s1": 80.05,   # Slurm elapsed, minutes
+            "grow_w64_from_d16_b0_s0": 42.53, "grow_w64_from_d16_b0_s1": 50.7, "grow_w128_from_d16_b0_s0": 114.23, "grow_w128_from_d16_b0_s1": 114.28}
+    for r in out:
+        r["gpu_min"] = acct.get(r["name"])
+    return out
+
+
+def halo():
+    """Halo benchmark (configs/halo): its checks, the rotation curves of the two targets and their toy isochrones, the
+    orbit radii spanned by the action box, and whichever runs have results here."""
+    import check_halo as K
+    sys.path.insert(0, ROOT); import make_halo_configs as M  # noqa: E402
+    out = dict(checks=dict(toy=K.toy_checks(), quadrature=K.quadrature_checks(), identity=K.identity_check(), nfw_orbits=K.nfw_orbit_checks()))
+    try:
+        out["checks"]["mw"] = K.mw_checks()
+    except Exception as e:  # galpy missing
+        out["checks"]["mw_error"] = repr(e)
+    fits = json.load(open(os.path.join(ROOT, "configs", "halo", "toy_fits.json")))
+    r = torch.exp(torch.linspace(math.log(0.03), math.log(8.0), 160, dtype=F))
+    tg = dict(nfw=C.NFW(2.0, 1.0), mw=C.MWPotential2014())
+    rc = dict(r_kpc=(8 * r).tolist())
+    mwx = lambda rr, ax: tg["mw"].pot(torch.stack([rr, 0 * rr, 0 * rr] if ax == "R" else [0 * rr, 0 * rr, rr], -1))
+    for key, t in tg.items():
+        rc[key] = (220 * torch.sqrt(M.vc2_target(t, r))).tolist()
+        GM, b = fits[key]["GM"], fits[key]["b"]; a = torch.sqrt(b * b + r * r)
+        rc[key + "_toy"] = (220 * torch.sqrt(GM * r * r / ((b + a) ** 2 * a))).tolist()
+    rr = r.clone().requires_grad_(True)
+    rc["mw_plane"] = (220 * torch.sqrt(rr * torch.autograd.grad(mwx(rr, "R").sum(), rr)[0])).tolist()
+    out.update(rotation=rc, fits=fits, box=M.BOX, r_fit_kpc=[8 * M.R_FIT[0], 8 * M.R_FIT[1]])
+    # orbit sizes at the corners of the action box, in the NFW (exact) and its toy
+    J = torch.tensor([[jr, l, 0.0] for jr in M.BOX["Jr"] for l in M.BOX["L"]], dtype=F)
+    E = tg["nfw"].E_of_J(J); rp, ra = tg["nfw"]._orbit(E, J[:, 1]); f = tg["nfw"].freqs(J)
+    out["corners"] = [dict(Jr=float(j[0]), L=float(j[1]), rp_kpc=8 * float(p), ra_kpc=8 * float(a_), period_myr=2 * math.pi / float(w[0]) * 8 / 220 * 977.8)
+                      for j, p, a_, w in zip(J, rp, ra, f)]
+    runs = []
+    for key in ("nfw", "mw"):
+        for wd in (32, 128):
+            for s in (0, 1):
+                rec = _run_record(f"halo_{key}_w{wd}_s{s}")
+                if rec:
+                    rec["target"] = key; runs.append(rec)
+    out["runs"] = runs
+    return out
+
+
 def main():
     t0 = time.perf_counter()
     data = dict(generated=time.strftime("%Y-%m-%d %H:%M"), sanity=sanity(), curves=curves(), generalisation=generalisation(),
-                quartic=quartic_portraits(), isochrone=isochrone_pictures(), sweep=sweep(), depth=depth())
-    G = [r["gpu_vs_cpu"] for r in data["depth"] if "gpu_vs_cpu" in r]
+                quartic=quartic_portraits(), isochrone=isochrone_pictures(), sweep=sweep(), depth=depth(), width=width(), halo=halo())
+    G = [r["gpu_vs_cpu"] for r in data["depth"] + data["width"] + data["halo"]["runs"] if "gpu_vs_cpu" in r]
     if G:
         data["sanity"].append(dict(group="GPU", what=f"H100-trained models ({len(G)}): held-out error on the H100 against a CPU re-evaluation, max relative difference",
                                     value=max(G), target="< 1e-10", ok=max(G) < 1e-10))
+    K = data["halo"]["checks"]; add = lambda what, value, target: data["sanity"].append(dict(group="Halo", what=what, value=value, target=f"< {target:g}", ok=value < target))
+    add(f"Isochrone toy ({K['toy']['n']} random points): Jacobian symplectic, max |MᵀΩM − Ω|", K["toy"]["symplectic_max"], 1e-9)
+    add("Isochrone toy: energy on each torus against the exact H(J), max relative error", K["toy"]["energy_rel_max"], 1e-11)
+    add("Isochrone toy: Hamilton's flow against the torus tangent at the exact frequencies, max relative error", K["toy"]["invariance_rel_max"], 1e-11)
+    add("Isochrone toy onto the same isochrone with the flow switched off: held-out energy error (identity is exact)", K["identity"]["held_out_mean"], 1e-13)
+    add("Quadrature H(J) on the isochrone against its closed form, max relative error", K["quadrature"]["E_rel_max"], 1e-12)
+    add("Quadrature frequencies on the isochrone against the closed form, max relative error", K["quadrature"]["freq_rel_max"], 1e-9)
+    add(f"NFW: orbit integrated for one radial period (from quadrature) returns to pericentre; radial-velocity and angle errors, max", max(K["nfw_orbits"]["vr_rel_max"], K["nfw_orbits"]["angle_err_max"]), 1e-8)
+    if "mw" in K:
+        add(f"MWPotential2014 against galpy at {K['mw']['n']} random points: potential and force, max relative difference", max(K["mw"]["pot_rel_max"], K["mw"]["force_rel_max"]), 1e-12)
     p = os.path.join(RES, "exp_invariance.json")
     if os.path.exists(p):
         data["invariance"] = json.load(open(p))

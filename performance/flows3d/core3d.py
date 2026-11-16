@@ -250,11 +250,17 @@ class MWPotential2014:
     """Bovy (2015) as in galpy: power-law bulge with an exponential cut-off (alpha = 1.8, r_c = 1.9 kpc), Miyamoto-Nagai
     disc (a = 3 kpc, b = 0.28 kpc) and NFW halo (a = 16 kpc), carrying 5%, 60% and 35% of v_c^2 at R0; natural units
     R0 = 8 kpc, v0 = 220 km/s. Axisymmetric, so there is no exact H(J): only held-out energy variance and torus
-    invariance measure a model here. The bulge term is galpy's (zero at the centre, constant at infinity)."""
+    invariance measure a model here. The bulge term is galpy's (zero at the centre, constant at infinity).
+    backend="native" is written here and equals galpy's numpy path to round-off; backend="galpy" calls galpy's torch
+    backend (development galpy), whose bulge differs from it by ~1e-8."""
     name = "mw2014"
 
-    def __init__(self):
+    def __init__(self, backend="native"):
         from math import gamma
+        self.backend = backend
+        if backend == "galpy":
+            from galpy.potential import MWPotential2014 as gp, evaluatePotentials
+            self._gal = lambda R, z: evaluatePotentials(gp, R, z, use_physical=False)
         self.al, self.rc = 1.8, 1.9 / 8; self.ad, self.bd = 3.0 / 8, 0.28 / 8; self.ah = 2.0
         s1 = 1.5 - self.al / 2
         xb = torch.tensor(1 / self.rc ** 2, dtype=F64)
@@ -267,6 +273,8 @@ class MWPotential2014:
 
     def pot(self, x):
         R2, z = x[..., 0] ** 2 + x[..., 1] ** 2, x[..., 2]
+        if self.backend == "galpy":
+            return self._gal(torch.sqrt(R2), z)
         r2 = R2 + z * z; r = torch.sqrt(r2); xb = r2 / self.rc ** 2
         s0, s1 = torch.tensor(1 - self.al / 2, dtype=F64, device=x.device), torch.tensor(1.5 - self.al / 2, dtype=F64, device=x.device)
         bulge = 2 * math.pi * self.rc ** (3 - self.al) * (self.g0 * torch.special.gammainc(s0, xb) / self.rc - self.g1 * torch.special.gammainc(s1, xb) / r)
@@ -311,7 +319,7 @@ def make_target(spec):
     if kind == "nfw":
         return NFW(spec.get("a", 2.0), spec.get("normalize", 1.0))
     if kind == "mw2014":
-        return MWPotential2014()
+        return MWPotential2014(spec.get("backend", "native"))
     raise ValueError(kind)
 
 
