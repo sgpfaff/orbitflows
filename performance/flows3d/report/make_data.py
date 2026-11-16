@@ -349,6 +349,30 @@ def halo():
                 if rec:
                     rec["target"] = key; runs.append(rec)
     out["runs"] = runs
+    # diagnostics: the smooth control, the oscillator-toy run and the denser-angle continuations, with each model's
+    # error on four sets: training or held-out tori, at the training angles or at 4,096 new ones
+    diag = []
+    extra = [("halo_isoctl_w32_s0", "iso", "smooth control: another isochrone"), ("halo_nfw_hotoy_w32_s0", "nfw", "NFW halo, oscillator toy"),
+             ("halo_nfw_w32_a1024_s0", "nfw", "NFW halo, 1,024 angles"), ("halo_nfw_w128_a1024_s0", "nfw", "NFW halo, 1,024 angles"),
+             ("halo_mw_w128_a1024_s0", "mw", "MWPotential2014, 1,024 angles")]
+    names = [(r["name"], r["target"], dict(nfw="NFW halo", mw="MWPotential2014")[r["target"]]) for r in runs] + extra
+    for name, key, label in names:
+        jd = os.path.join(RES, name)
+        if not os.path.exists(os.path.join(jd, "state.pt")):
+            continue
+        c = json.load(open(os.path.join(jd, "config.json"))); st = torch.load(os.path.join(jd, "state.pt"), weights_only=False)
+        t = C.make_target(c["target"]); m = C.build_model(c["model"], c["toy"], seed=c.get("seed", 0)); m.load_state_dict(st["state"])
+        Jt, Jh, tht, _ = grids(c); thn = C.angle_samples(4096, 12345)
+        with torch.no_grad():
+            f = lambda J, th: float(C.residuals(m, C.aa_points(J, th), t).abs().mean())
+            rec = dict(name=name, target=key, label=label, width=c["model"]["width"], seed=c.get("seed", 0), n_angles=c["data"]["n_angles"], steps=st["it"],
+                       toy=c["toy"].get("kind", "cartesian"), grown=bool(c.get("grow")), cont=bool(c.get("init_from")) and not c.get("grow"),
+                       train=f(Jt, tht), new_angles=f(Jt, thn), new_tori=f(Jh, tht), held_out=f(Jh, thn))
+        rp = os.path.join(jd, "result.json")
+        if os.path.exists(rp):
+            rec["lm_stop"] = json.load(open(rp))["lm_stop"]
+        diag.append(rec)
+    out["diag"] = diag
     return out
 
 

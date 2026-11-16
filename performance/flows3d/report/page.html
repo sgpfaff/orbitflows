@@ -258,6 +258,9 @@ td.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums; white-space
       <div class="grid2" id="fig-halo"></div>
       <div class="tablewrap" id="halo-table"></div>
       <div class="cap" id="halo-cap"></div></div>
+    <div class="fig" id="halo-diag-fig"><h3>Why the halo runs stall: where each model's error is</h3>
+      <div class="tablewrap" id="halo-diag"></div>
+      <div class="cap" id="halo-diag-cap"></div></div>
   </section>
 
   <section id="log">
@@ -323,7 +326,7 @@ const HL = DATA.halo || null;
     `<span><i class="dot" style="background:${DATA.invariance ? 'var(--good)' : 'var(--warn)'}"></i>invariance experiment ${DATA.invariance ? 'finished' : 'running'}</span>` +
     (DATA.depth && DATA.depth.length ? `<span><i class="dot" style="background:var(--good)"></i>depth test finished (geir, then H100)</span>` : '') +
     (WD.length ? `<span><i class="dot" style="background:var(--good)"></i>width test finished (H100)</span>` : '') +
-    (HL ? `<span><i class="dot" style="background:var(--warn)"></i>halo benchmark: ${HL.runs.length ? 'first stage stalled, diagnosing' : 'set up, runs starting'}</span>` : '');
+    (HL ? `<span><i class="dot" style="background:var(--warn)"></i>halo benchmark: ${HL.runs.length ? 'stalls at 10⁻³–10⁻², diagnosing' : 'set up, runs starting'}</span>` : '');
   const last = n => { const c = DATA.curves[n]; return c ? c[c.length - 1].ev : null; };
   const tiles = [
     ['Anisotropic oscillator', '2.6e-16', 'held-out error with linear shears only, by LM step 15: machine precision (the exact map is linear)'],
@@ -340,7 +343,7 @@ const HL = DATA.halo || null;
     <li><b>The main finding so far:</b> the energy-variance loss barely constrains deformations along slow angle combinations. On the isochrone, the learned tori are energy-constant to ${fmt(d3.median(DATA.isochrone.per_torus.energy))} (median), but their angular momentum wanders ${Math.round(d3.median(DATA.isochrone.per_torus.wander) / d3.median(DATA.isochrone.per_torus.energy))}× more, in modes with k·Ω ≈ 0 (section 3). Training longer on the energy loss alone roughly halves it, and adding a small invariance term (β = 0.01) cuts it by a further ~20% at equal steps, while also lowering the energy error (section 5).</li>
     ${DATA.depth && DATA.depth.length ? `<li><b>Depth doesn’t help in 3D</b> (section 6). At about 2,600 parameters, 16 layers end lower than 32 in ${DEPTH_PAIRS.filter(p => p.a.eval_mean < p.c.eval_mean).length} of ${DEPTH_PAIRS.length} matched pairs, and every run stalls between ${sup(d3.min(DATA.depth, r => r.final.eval_mean))} and ${sup(d3.max(DATA.depth, r => r.final.eval_mean))}. Two seeds of the same flow differ by up to ${d3.max(DEPTH_SEEDS, p => p.ratio).toFixed(1)}×, as much as depth or β changes things. That points to where each run settles rather than to the architecture. On an H100, a 3D LM step is about 70× faster than on geir.</li>` : ''}
     ${wdGain(128) ? `<li><b>Width is the lever</b> (section 7). Growing the trained 32-wide flows to 128 wide, about 4× the parameters, lowers the held-out error ${Math.round(wdGain(128))}× to ${wdGrown(128).map(r => sup(r.final.eval_mean)).join(' and ')}; one of the two was still falling by ${Math.abs(100 * d3.min(wdGrown(128), r => r.last500_change)).toFixed(0)}% per 500 steps at its time limit. So the 1–4×10⁻⁴ stall was a capacity limit. Starting wide flows from scratch is unreliable: ${wdStuck.length} of ${WD.filter(r => !r.grown && r.width > 32).length} got stuck at about 9×10⁻³.</li>` : ''}
-    ${HL ? `<li><b>Next benchmark</b> (section 8): the same method from an exact isochrone toy onto an NFW halo and onto MWPotential2014, over orbits from 0.9 to 27 kpc. The new pieces pass their checks. ${HL.runs.length ? `The first 32-wide runs stalled early, at ${sup(d3.min(HL.runs.filter(r => r.target === 'nfw'), r => r.final.eval_mean))} (NFW) and ${sup(d3.min(HL.runs.filter(r => r.target === 'mw'), r => r.final.eval_mean))} (MWPotential2014); the cause is being tested.` : 'Training is starting.'} A separate note, <a href="https://claude.ai/artifact/QphiMromjg4HfouxumKjNN">Why Energy Suffices</a>, sets out why the energy loss is enough and where it is weak.</li>` : ''}</ul>`;
+    ${HL ? `<li><b>Next benchmark</b> (section 8): the same method from an exact isochrone toy onto an NFW halo and onto MWPotential2014, over orbits from 0.9 to 27 kpc. The new pieces pass their checks. ${HL.runs.length ? `The runs stall early, at ${sup(d3.min(HL.runs.filter(r => r.target === 'nfw'), r => r.final.eval_mean))} (NFW) and ${sup(d3.min(HL.runs.filter(r => r.target === 'mw'), r => r.final.eval_mean))} (MWPotential2014), and unlike on the isochrone a wider flow does not help: it fits the sampled angles better and new angles no better. The toy is not the cause; the cusped targets are harder.` : 'Training is starting.'} A separate note, <a href="https://claude.ai/artifact/QphiMromjg4HfouxumKjNN">Why Energy Suffices</a>, sets out why the energy loss is enough and where it is weak.</li>` : ''}</ul>`;
 })();
 
 /* ---------- sanity table ---------- */
@@ -591,7 +594,7 @@ if (HL) {
     $('#fig-halo').remove(); $('#halo-table').remove(); $('#halo-legend').remove();
     $('#halo-cap').innerHTML = 'No results yet. The four first-stage runs (32 wide, both targets, two seeds) were submitted to H100s on 16 Nov; the 128-wide stage follows from whichever of them train cleanly.';
   } else {
-    $('#halo-legend').innerHTML = legend([...[...new Set(HR.map(r => r.width))].sort((a, b) => a - b).map(w => [tok(HC[w]), `16 layers × ${w} wide`]), [tok('--ink-2'), 'seed 1 dashed, seed 0 solid', true]]);
+    $('#halo-legend').innerHTML = legend([...[...new Set(HR.map(r => r.width))].sort((a, b) => a - b).map(w => [tok(HC[w]), `16 layers × ${w} wide${w > 32 ? ' (grown; steps counted from the growing)' : ''}`]), [tok('--ink-2'), 'seed 1 dashed, seed 0 solid', true]]);
     chart('fig-halo', el => {
       const w = document.createDocumentFragment();
       Object.keys(TN).forEach(tk => {
@@ -612,10 +615,28 @@ if (HL) {
       ${HR.map(r => `<tr><td>${TN[r.target]}</td><td>16 layers × ${r.width}${r.grown ? ', grown' : ''}</td><td class="num">${r.seed}</td><td class="num">${r.steps.toLocaleString()}</td><td>${r.lm_stop ? (r.lm_stop === 'plateau' ? 'plateau rule' : r.lm_stop === 'walltime' ? 'time limit' : r.lm_stop) : 'running'}</td>
         ${hk.map(([k]) => `<td class="num">${fmt(r.final[k])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
     const s1 = HR.filter(r => r.width === 32 && !r.grown), wide = HR.filter(r => r.width > 32);
-    const stall = s1.length && s1.every(r => r.lm_stop === 'plateau') ? `<b>First stage:</b> all ${s1.length} runs stopped on the plateau rule after ${d3.min(s1, r => r.steps)}–${d3.max(s1, r => r.steps).toLocaleString()} LM steps, about two minutes of H100 time each, at ${sup(d3.min(s1.filter(r => r.target === 'nfw'), r => r.final.eval_mean))}–${sup(d3.max(s1.filter(r => r.target === 'nfw'), r => r.final.eval_mean))} for the NFW halo and ${sup(d3.min(s1.filter(r => r.target === 'mw'), r => r.final.eval_mean))}–${sup(d3.max(s1.filter(r => r.target === 'mw'), r => r.final.eval_mean))} for MWPotential2014. That is 15–60 times worse than the same flow reached on the isochrone (section 6), and the loss was already flat by step 200. The error is spread evenly over the tori, and the toy orbits are within 15% of the target ones, so this is not a few bad tori or a large map. ${wide.length ? '' : 'Runs to find the cause are queued: the 128-wide stage, a smooth isochrone target in the same box, and the NFW halo from the oscillator toy.'} ` : '';
+    const stall = s1.length && s1.every(r => r.lm_stop === 'plateau') ? `<b>First stage:</b> all ${s1.length} runs stopped on the plateau rule after ${d3.min(s1, r => r.steps)}–${d3.max(s1, r => r.steps).toLocaleString()} LM steps, about two minutes of H100 time each, at ${sup(d3.min(s1.filter(r => r.target === 'nfw'), r => r.final.eval_mean))}–${sup(d3.max(s1.filter(r => r.target === 'nfw'), r => r.final.eval_mean))} for the NFW halo and ${sup(d3.min(s1.filter(r => r.target === 'mw'), r => r.final.eval_mean))}–${sup(d3.max(s1.filter(r => r.target === 'mw'), r => r.final.eval_mean))} for MWPotential2014. That is 15–60 times worse than the same flow reached on the isochrone (section 6), and the loss was already flat by step 200. The error is spread evenly over the tori, and the toy orbits are within 15% of the target ones, so this is not a few bad tori or a large map. ${wide.length ? 'The table below breaks the error down.' : 'Runs to find the cause are queued: the 128-wide stage, a smooth isochrone target in the same box, and the NFW halo from the oscillator toy.'} ` : '';
     $('#halo-cap').innerHTML = stall + `Held-out measures as in sections 6 and 7, each model re-evaluated on the CPU from its latest checkpoint. For the NFW halo, |L| wander is an error and L<sub>z</sub> wander is not (a spherical potential leaves the tilt of a torus free). For MWPotential2014 it is the other way round: L<sub>z</sub> is conserved on true tori and |L| is not, and there is no exact H(J) to compare with. ${HR.some(r => !r.lm_stop) ? 'Runs marked “running” are snapshots.' : ''}`;
   }
 }
+
+/* ---------- halo diagnostics ---------- */
+if (HL && HL.diag && HL.diag.length) {
+  const D = HL.diag, cols = [['train', 'Training tori, training angles'], ['new_angles', 'Training tori, new angles'], ['new_tori', 'Held-out tori, training angles'], ['held_out', 'Held-out tori, new angles']];
+  const how = r => r.cont ? 'continued' : r.grown ? 'grown from 32' : 'from scratch';
+  $('#halo-diag').innerHTML = `<table><thead><tr><th>Run</th><th>Flow</th><th>Start</th><th>Seed</th><th>Angles per torus</th><th>LM steps</th>${cols.map(c => `<th>${c[1]}</th>`).join('')}<th>New angles ÷ training angles</th></tr></thead><tbody>
+    ${D.map(r => `<tr><td>${r.label}</td><td>16 layers × ${r.width}</td><td>${how(r)}</td><td class="num">${r.seed}</td><td class="num">${r.n_angles.toLocaleString()}</td><td class="num">${r.steps.toLocaleString()}</td>
+      ${cols.map(([k]) => `<td class="num">${fmt(r[k])}</td>`).join('')}<td class="num"><b>${(r.new_angles / r.train).toFixed(1)}×</b></td></tr>`).join('')}</tbody></table>`;
+  const g = (t, w, a) => D.filter(r => r.target === t && r.width === w && r.n_angles === a && r.toy === 'isochrone' && !r.cont);
+  const m = (rows, k) => rows.length ? d3.mean(rows, r => r[k]) : null;
+  const n32 = g('nfw', 32, 256), n128 = g('nfw', 128, 256), ho = D.find(r => r.name === 'halo_nfw_hotoy_w32_s0'), ctl = D.find(r => r.name === 'halo_isoctl_w32_s0'), dense = D.filter(r => r.n_angles > 256);
+  let t = `Mean relative energy error of each model on four sets of points: its training tori or the held-out tori, at the angles it was trained on or at 4,096 new ones. `;
+  if (n32.length && n128.length) t += `<b>Width does not help here.</b> Growing the NFW flows from 32 to 128 wide lowers the error on the training points from ${sup(m(n32, 'train'))} to ${sup(m(n128, 'train'))}, but at new angles on the same tori it stays at ${sup(m(n128, 'new_angles'))}: the extra units fit the 256 sampled angles and nothing else. On the isochrone the same step gave 15× (section 7). `;
+  if (ho) t += `<b>The toy is not the cause:</b> from the oscillator toy the NFW run ends at ${sup(ho.held_out)}, the same as from the isochrone toy. `;
+  if (ctl) t += `<b>The target is:</b> with the same toy, box and flow, a different isochrone as the target reaches ${sup(ctl.held_out)}, ${(m(n32, 'held_out') / ctl.held_out).toFixed(0)}× lower than the NFW halo. A likely reason, not yet tested: both halo targets are cusped at the centre where the isochrone is flat, and MWPotential2014 also has a disc 0.28 kpc thick, so the map onto them has finer structure than the map onto a cored target. `;
+  t += dense.length ? `<b>Denser angles:</b> the rows with 1,024 angles continue trained models on four times as many points per torus.` : `<b>Next:</b> runs with 1,024 angles per torus are queued, to test whether angle sampling is what limits the wide flows.`;
+  $('#halo-diag-cap').innerHTML = t;
+} else if ($('#halo-diag-fig')) $('#halo-diag-fig').remove();
 
 /* ---------- decisions ---------- */
 $('#decisions').innerHTML = [
