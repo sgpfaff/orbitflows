@@ -70,6 +70,16 @@ def main():
                        model=dict(n_lin=2, n_blocks=8, width=32, gate_std=1e-3), adam=dict(steps=1000, lr=1e-3),
                        lm=dict(invariance_beta=0.0, inv_angles=64, geodesic=True, every=10, ckpt_every=50, lam0=1e-3, plateau=[500, 0.01],
                                max_iters=20000, wall_hours=0.75, chunk=128)), open(os.path.join(out, name + ".json"), "w"), indent=1)
+    # Angle-sampling test (16 Nov): continue trained models with 1,024 angles per torus instead of 256 (the first 256
+    # are the same points). On the 256-angle models the error at new angles on the training tori is up to 4x the
+    # error at the training angles.
+    for name, key, width, chunk in (("halo_nfw_w128_a1024_s0", "nfw", 128, 16), ("halo_mw_w128_a1024_s0", "mw", 128, 16), ("halo_nfw_w32_a1024_s0", "nfw", 32, 64)):
+        spec = dict(kind="nfw", a=2.0, normalize=1.0) if key == "nfw" else dict(kind="mw2014")
+        toy = dict(kind="isochrone", GM=round(fits[key]["GM"], 6), b=round(fits[key]["b"], 6))
+        json.dump(dict(toy=toy, data=dict(BOX, n_angles=1024), target=spec, seed=0, threads=24, device="cuda", name=name,
+                       model=dict(n_lin=2, n_blocks=8, width=width, gate_std=1e-3), adam=dict(steps=0), init_from=f"halo_{key}_w{width}_s0",
+                       lm=dict(invariance_beta=0.0, inv_angles=64, geodesic=True, every=10, ckpt_every=50, lam0=1e-3, plateau=[500, 0.01],
+                               max_iters=20000, wall_hours=0.75, chunk=chunk)), open(os.path.join(out, name + ".json"), "w"), indent=1)
     json.dump(fits, open(os.path.join(out, "toy_fits.json"), "w"), indent=1)
     print(json.dumps(fits, indent=1))
 
