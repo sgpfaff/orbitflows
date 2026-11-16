@@ -174,7 +174,26 @@ Checks (`check_halo.py`, re-run by `report/make_data.py`):
 
 `MWPotential2014` is written directly in torch. galpy's torch backend was chosen earlier as the definition of the 3D Milky Way target; as of the 2.0.0b1 pre-release (`pip install --pre galpy`, in `~/.venvs/galpy-2b1` on the laptop) it agrees with the native one to round-off, where the earlier development build was 1e-8 off in the bulge. `{"kind": "mw2014", "backend": "galpy"}` calls it instead. Its bulge has no forward-mode derivative, so `vmap(hessian)` fails on it; that only matters for LM with the invariance term (β > 0).
 
-Runs: stage 1 submitted to H100s on 16 Nov (jobs 1344003–06).
+### Results so far (16 Nov, 2.4 GPU-h in all)
+
+Held-out energy error, 16 layers, β = 0, plateau rule. Jobs 1344003–06, 1344458–63, 1344551–53.
+
+| Run | Seed 0 | Seed 1 |
+|---|---|---|
+| NFW, 32 wide, 256 angles | 4.0e-3 | 3.4e-3 |
+| NFW, grown to 128 wide, 256 angles | 3.4e-3 | 3.2e-3 |
+| NFW, 32 wide, continued with 1,024 angles | 2.3e-3 | |
+| NFW, 128 wide, continued with 1,024 angles | 1.2e-3 (time limit, still falling 4% per 500 steps) | |
+| NFW from the oscillator toy, 32 wide | 3.2e-3 | |
+| MWPotential2014, 32 wide, 256 angles | 8.1e-3 | 8.2e-3 |
+| MWPotential2014, grown to 128 wide, 256 angles | 8.9e-3 | 9.1e-3 |
+| MWPotential2014, 128 wide, continued with 1,024 angles | 5.0e-3 | |
+| Smooth control: another isochrone (GM 5, b 0.65), 32 wide | 8.3e-4 | |
+
+- The same flow reached 1.4–2.3e-4 (32 wide) and 1.1–1.3e-5 (128 wide) on the isochrone. These targets are 100 times harder for it.
+- With 256 angles per torus, width only overfits: at 128 wide the error at new angles on the training tori is 4 times the error at the training angles. With 1,024 angles that gap closes (1.3 times) and width helps again, but the fit to the training points is itself poor (NFW 9.7e-4, MWPotential2014 3.8e-3 at 128 wide).
+- The toy is not the cause (oscillator and isochrone toys give the same). The target is: a smooth isochrone target in the same box trains 4 times better at 32 wide.
+- Working explanation, untested: the cusp (and the 0.28 kpc disc) put fine structure into the map near pericentre and disc crossings, and a generic 6D flow has to learn the rotational symmetry as well from the samples.
 
 ## Theory note: why constant energy is enough (16 Nov)
 
