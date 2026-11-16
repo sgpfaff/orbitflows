@@ -2,3 +2,5 @@ results/
 __pycache__/
 report/data.json
 report/flows3d_progress.html
+report/note_data.json
+report/why_energy_suffices.html

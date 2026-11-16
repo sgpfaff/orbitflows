@@ -1,0 +1,396 @@
+<meta charset="utf-8">
+<title>Why Energy Suffices</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<style>
+/* Layout: a single reading column (~70ch) for the argument, with figures and tables breaking out to the full
+   1000px measure. Same palette and type as the 3D progress page, so the two read as one project. */
+:root{
+  --bg:#f3f5f8; --surface:#fbfcfd; --raised:#ffffff;
+  --ink:#121620; --ink-2:#465061; --muted:#7a8394; --rule:#dce1e8; --rule-2:#c6cdd8;
+  --accent:#2f43a8; --accent-soft:#e5e8f6;
+  --good:#17824a; --good-soft:#e2f2e9; --crit:#c0352e; --warn:#c8671a;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+  --f-display:"Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body:"Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --step--1:.8125rem; --step-0:1.0625rem; --step-1:1.1875rem; --step-2:1.5rem; --step-3:2rem; --step-4:2.6rem;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1117; --surface:#151a22; --raised:#1a2029;
+    --ink:#e7ebf1; --ink-2:#aab3c1; --muted:#7c8597; --rule:#262d38; --rule-2:#343c49;
+    --accent:#93a2ff; --accent-soft:#1d2342;
+    --good:#4cc47f; --good-soft:#15291e; --crit:#ef6a61; --warn:#eb9a4f;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1117; --surface:#151a22; --raised:#1a2029;
+  --ink:#e7ebf1; --ink-2:#aab3c1; --muted:#7c8597; --rule:#262d38; --rule-2:#343c49;
+  --accent:#93a2ff; --accent-soft:#1d2342;
+  --good:#4cc47f; --good-soft:#15291e; --crit:#ef6a61; --warn:#eb9a4f;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg); color:var(--ink); font-family:var(--f-body); font-size:var(--step-0); line-height:1.62; margin:0}
+.wrap{max-width:1000px; margin:0 auto; padding-left:max(16px, env(safe-area-inset-left, 0px)); padding-right:max(16px, env(safe-area-inset-right, 0px)); padding-block:36px 90px; display:grid; gap:48px}
+@media (min-width:700px){.wrap{padding-left:max(36px, env(safe-area-inset-left, 0px)); padding-right:max(36px, env(safe-area-inset-right, 0px))}}
+h1,h2,h3{font-family:var(--f-display); text-wrap:balance; letter-spacing:-.01em; margin:0}
+h1{font-size:var(--step-4); line-height:1.06; font-weight:760; font-stretch:88%; max-width:18ch}
+h2{font-size:var(--step-3); line-height:1.15; font-weight:720; font-stretch:92%; max-width:26ch}
+h3{font-size:var(--step-1); line-height:1.3; font-weight:650}
+p{margin:0}
+a{color:var(--accent)}
+section{display:grid; gap:18px; min-width:0}
+.prose{max-width:70ch; display:grid; gap:14px; min-width:0}
+.prose ul,.prose ol{margin:0; padding-left:1.25em; display:grid; gap:8px}
+.eyebrow{font-family:var(--f-display); font-size:.75rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
+.lede{font-size:var(--step-1); color:var(--ink-2); max-width:60ch}
+.mono{font-family:var(--f-mono); font-size:.86em}
+.short{background:var(--surface); border:1px solid var(--rule); border-radius:12px; padding:18px 20px; max-width:76ch}
+.short ol{margin:0; padding-left:1.3em; display:grid; gap:10px}
+.thm{border-left:3px solid var(--accent); background:var(--accent-soft); padding:14px 18px; border-radius:0 10px 10px 0; display:grid; gap:10px; max-width:74ch; min-width:0}
+.thm .name{font-family:var(--f-display); font-weight:700; font-size:var(--step--1); letter-spacing:.06em; text-transform:uppercase; color:var(--accent)}
+.proof{max-width:70ch; color:var(--ink-2); display:grid; gap:10px; min-width:0}
+.proof b{font-family:var(--f-display); font-weight:650; color:var(--ink)}
+.eqn{overflow-x:auto; overflow-y:hidden; padding:2px 0; max-width:100%}
+figure{margin:0}
+.fig{background:var(--surface); border:1px solid var(--rule); border-radius:12px; padding:16px; display:grid; gap:10px; min-width:0}
+.fig h3{font-size:1rem}
+.fig svg{max-width:100%; height:auto; display:block}
+.diagram{overflow-x:auto}
+.diagram svg{min-width:560px; width:100%}
+.cap, figcaption{font-size:var(--step--1); color:var(--ink-2); line-height:1.5; max-width:84ch}
+.plot{min-width:0; overflow:hidden}
+.plot svg{overflow:visible}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse; width:100%; font-size:var(--step--1); font-family:var(--f-display)}
+th,td{padding:7px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top}
+th{color:var(--muted); font-weight:600; font-size:.75rem; letter-spacing:.04em; text-transform:uppercase}
+td.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums; white-space:nowrap}
+.mathhead th{text-transform:none; letter-spacing:0; font-size:.78rem}
+.legend{display:flex; flex-wrap:wrap; gap:6px 14px; font-family:var(--f-display); font-size:.75rem; color:var(--ink-2)}
+.legend i{display:inline-block; width:14px; height:3px; border-radius:2px; margin-right:6px; vertical-align:middle}
+.legend i.pt{width:8px; height:8px; border-radius:50%}
+.legend i.dash{background:repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px) !important; height:2px}
+.tex{background:var(--raised); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; font-family:var(--f-mono); font-size:.78rem; line-height:1.55; white-space:pre-wrap; overflow-x:auto; margin:0; max-height:420px; overflow-y:auto}
+.btn{font-family:var(--f-display); font-size:var(--step--1); font-weight:600; color:var(--accent); background:var(--raised); border:1px solid var(--rule-2); border-radius:8px; padding:6px 12px; cursor:pointer; justify-self:start}
+.btn:hover{border-color:var(--accent)} .btn:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.status{font-family:var(--f-display); font-size:var(--step--1); color:var(--ink-2)}
+/* diagram marks */
+.d-contour{fill:none; stroke:var(--rule-2); stroke-width:1.2}
+.d-curve{fill:none; stroke:var(--ink); stroke-width:2.6}
+.d-flow{stroke:var(--s2); stroke-width:2; fill:none} .d-flow-head{fill:var(--s2)}
+.d-ink{stroke:var(--ink-2); stroke-width:1.2; fill:none} .d-ink-head{fill:var(--ink-2)}
+.d-om{stroke:var(--s1); stroke-width:2.2; fill:none} .d-om-head{fill:var(--s1)}
+.d-om-text{fill:var(--s1); font-family:var(--f-display); font-size:13px; font-weight:650}
+.d-torus{stroke:var(--s2); stroke-width:6; stroke-linecap:round; fill:none}
+.d-dot{fill:var(--ink)}
+.d-ring{fill:none; stroke:var(--ink); stroke-width:2.2}
+.d-ring-tilt{fill:none; stroke:var(--s1); stroke-width:2.2}
+.d-title{fill:var(--ink); font-family:var(--f-display); font-size:13px; font-weight:650}
+.d-note{fill:var(--ink-2); font-family:var(--f-display); font-size:12px}
+mjx-container{color:inherit}
+mjx-container[display="true"]{margin:.2em 0 !important}
+</style>
+<div class="wrap">
+  <header style="display:grid; gap:14px">
+    <div class="eyebrow">orbitflows · 3D torus flows · theory note</div>
+    <h1>Why constant energy is enough to find a torus</h1>
+    <p class="lede">The 3D flows are trained with one requirement: the energy must be constant on every image torus. A system with three degrees of freedom has three integrals, so it is fair to ask why one condition can be enough. This note gives the argument, shows the two places where it is weak, and checks both against the trained models.</p>
+    <div class="status">Companion to the <a href="https://claude.ai/artifact/Q1TyHuihrV7vqSqsnX8gb1">3D progress page</a>. Every number here is recomputed from the saved models.</div>
+  </header>
+
+  <section>
+    <h2>The short version</h2>
+    <div class="short"><ol>
+      <li><b>The map is symplectic, so every image torus is Lagrangian and has the right actions.</b> This holds by construction, before any training.</li>
+      <li><b>A Lagrangian torus on which H is constant is invariant under the motion.</b> The energy condition is one function that must vanish on a whole three-dimensional surface, not one number, and the Lagrangian property turns it into invariance.</li>
+      <li><b>If the energy is constant on every torus, the map is an action-angle map.</b> The other integrals are then constant on each torus wherever its orbits fill it.</li>
+      <li><b>It is weak in two cases.</b> Where a frequency combination k·Ω vanishes identically, as in any spherical potential, several different sets of tori satisfy it equally. Where k·Ω is small, the energy responds to an error in the torus only in proportion to k·Ω, so a small energy error can hide a much larger error in the torus.</li>
+    </ol></div>
+  </section>
+
+  <section>
+    <div class="eyebrow">1 · Setting</div>
+    <h2>The map, the tori, and the one function that matters</h2>
+    <div class="prose">
+      <p>Phase space is \(\mathbb{R}^{2n}\) with coordinates \(z=(\mathbf{x},\mathbf{v})\) and symplectic form \(\omega=\sum_i dx_i\wedge dv_i\); here \(n=3\). The Hamiltonian vector field \(X_H=(\partial H/\partial\mathbf{v},\,-\partial H/\partial\mathbf{x})\) satisfies \(\omega(X_H,w)=dH(w)\) for every vector \(w\).</p>
+      <p>The model is a composition \(T=F\circ\tau\). The toy map \(\tau:(\boldsymbol\theta,\mathbf{J})\mapsto z\) is the exact action-angle map of a solvable potential (an oscillator or the isochrone). The flow \(F\) is a composition of shears \(\mathbf{x}\to\mathbf{x}+\nabla W(\mathbf{v})\) and \(\mathbf{v}\to\mathbf{v}+\nabla U(\mathbf{x})\), each exactly symplectic. So \(T\) is symplectic: \(T^{*}\omega=\sum_i d\theta_i\wedge dJ_i\).</p>
+      <p>For fixed \(\mathbf{J}\), the image of the toy torus is \(\mathcal{T}_{\mathbf{J}}=T(\mathbb{T}^n\times\{\mathbf{J}\})\). Everything below is a statement about one function, the target Hamiltonian written in the model's coordinates:</p>
+      <div class="eqn">\[K(\boldsymbol\theta,\mathbf{J})\;\equiv\;H\big(T(\boldsymbol\theta,\mathbf{J})\big).\]</div>
+      <p>The training loss is the variance of \(K\) over \(\boldsymbol\theta\) on each torus, \(\big\langle (K-\langle K\rangle_{\boldsymbol\theta})^2\big\rangle_{\boldsymbol\theta}\), divided by a fixed energy scale. It vanishes exactly when \(K\) depends on \(\mathbf{J}\) alone.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">2 · What holds before training</div>
+    <h2>Every image torus is Lagrangian and carries the actions J</h2>
+    <div class="prose">
+      <p>A submanifold is <b>Lagrangian</b> if it has dimension \(n\) and \(\omega\) vanishes on every pair of its tangent vectors. A toy torus \(\{\mathbf{J}=\text{const}\}\) is Lagrangian, because \(\sum d\theta_i\wedge dJ_i\) vanishes when \(d\mathbf{J}=0\). A symplectic map preserves \(\omega\), so \(\mathcal{T}_{\mathbf{J}}\) is Lagrangian too.</p>
+      <p>The actions of a torus are the loop integrals \(\frac{1}{2\pi}\oint_{\gamma_i}\mathbf{v}\cdot d\mathbf{x}\) round its \(n\) independent loops. On the toy torus they are \(J_i\) by definition. Each shear changes \(\mathbf{v}\cdot d\mathbf{x}\) by an exact differential (for \(\mathbf{x}\to\mathbf{x}+\nabla W(\mathbf{v})\) it adds \(d(\mathbf{v}\cdot\nabla W-W)\)), and a loop integral of an exact differential is zero. So the image torus has actions \(J_i\) as well, on the loops it inherits from the toy.</p>
+      <p>Training therefore never has to learn the actions. Whatever the weights are, \(\mathcal{T}_{\mathbf{J}}\) is a Lagrangian torus with actions \(\mathbf{J}\). The only question is whether it is the right one.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">3 · The key step</div>
+    <h2>Constant energy on a Lagrangian torus makes it invariant</h2>
+    <div class="thm"><div class="name">Lemma</div>
+      <p>Let \(\mathcal{T}\) be a Lagrangian submanifold and suppose \(H\) is constant on \(\mathcal{T}\). Then \(X_H\) is tangent to \(\mathcal{T}\), and \(\mathcal{T}\) is carried into itself by the motion.</p></div>
+    <div class="proof">
+      <p><b>Proof.</b> Take any vector \(w\) tangent to \(\mathcal{T}\). Since \(H\) does not change along \(\mathcal{T}\), \(dH(w)=0\), and so \(\omega(X_H,w)=0\). So \(X_H\) is \(\omega\)-orthogonal to every tangent vector of \(\mathcal{T}\). The set of vectors with that property is the symplectic complement of the tangent space, which has dimension \(2n-n=n\). On a Lagrangian submanifold the tangent space is contained in its own complement and has the same dimension, so the two coincide. Hence \(X_H\) is tangent to \(\mathcal{T}\). A compact surface to which the vector field is everywhere tangent is invariant under its flow.</p>
+    </div>
+    <div class="prose">
+      <p>This is the answer to the counting worry. An arbitrary 3-torus on which \(H\) is constant is just some surface inside a five-dimensional energy shell, and orbits leave it. A Lagrangian one cannot be left, because the only directions \(\omega\)-orthogonal to all of it are its own. The symplectic construction supplies the two conditions that the missing integrals would otherwise have supplied.</p>
+      <p>With one degree of freedom the statement is familiar, because every curve in the phase plane is Lagrangian:</p>
+    </div>
+    <figure class="fig"><h3>One degree of freedom: a closed curve is an orbit exactly when H is constant on it</h3>
+      <div class="diagram">__FIG_PHASE__</div>
+      <figcaption>Grey: level curves of H. Black: the image of a toy circle. Orange: the motion, which always runs along the level curves. Left, the curve crosses level curves, so H varies along it and the motion carries points off it. Right, the curve is a level curve and the motion stays on it. In more dimensions the Lagrangian property is what makes the same picture hold.</figcaption></figure>
+  </section>
+
+  <section>
+    <div class="eyebrow">4 · Sufficiency</div>
+    <h2>Zero energy variance on every torus gives action-angle variables</h2>
+    <div class="thm"><div class="name">Proposition</div>
+      <p>Suppose \(K(\boldsymbol\theta,\mathbf{J})=h(\mathbf{J})\) for all \(\mathbf{J}\) in an open set. Then on the image of that set, \((\boldsymbol\theta,\mathbf{J})\) are action-angle variables of \(H\): each \(\mathcal{T}_{\mathbf{J}}\) is an invariant torus with actions \(\mathbf{J}\), and on it the angles advance uniformly at the frequencies \(\boldsymbol\Omega=\partial h/\partial\mathbf{J}\).</p></div>
+    <div class="proof">
+      <p><b>Proof.</b> \(T\) is canonical, so Hamilton's equations hold in \((\boldsymbol\theta,\mathbf{J})\) with Hamiltonian \(K\): \(\dot{\boldsymbol\theta}=\partial K/\partial\mathbf{J}=\partial h/\partial\mathbf{J}\) and \(\dot{\mathbf{J}}=-\partial K/\partial\boldsymbol\theta=0\).</p>
+    </div>
+    <div class="prose">
+      <p>Three things follow, and none of them uses any integral other than \(H\).</p>
+      <ul>
+        <li><b>The angles come for free.</b> The model's \(\boldsymbol\theta\) are true angle variables, and the frequencies are the derivative of the torus energy with respect to the labels, available by automatic differentiation. Classical torus mapping minimises the same energy variance over the coefficients of a generating function, and recovers the angles in a separate step.</li>
+        <li><b>The other integrals are constant on each torus, where its orbits fill it.</b> Any integral \(C\) is constant along an orbit. If the frequencies on \(\mathcal{T}_{\mathbf{J}}\) are rationally independent, a single orbit is dense in the torus, so \(C\) is constant on all of it by continuity. Nothing about \(C\) was imposed.</li>
+        <li><b>The torus is then the true one.</b> In an integrable potential an invariant torus with a dense orbit is the closure of that orbit, which is a level set of the integrals. Its actions are \(\mathbf{J}\), so it is the true torus with those actions.</li>
+      </ul>
+      <p>The second and third points need the orbits to fill the torus. That is the first place the argument weakens. The second is that training never reaches zero variance, so what matters in practice is how strongly a small energy variance constrains the torus. Both come out of one calculation.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">5 · Where it is weak</div>
+    <h2>The energy sees an error in the torus only through k·Ω</h2>
+    <div class="prose">
+      <p>Let \((\boldsymbol\phi,\mathbf{I})\) be exact action-angle variables of \(H\), with \(H=h(\mathbf{I})\) and \(\boldsymbol\Omega=\partial h/\partial\mathbf{I}\). Take the true torus \(\mathbf{I}=\mathbf{I}_0\) and ask which nearby surfaces the model could produce instead. They must be Lagrangian with the same actions, and every such surface is the graph of the gradient of a periodic function \(S\):</p>
+      <div class="eqn">\[\mathbf{I}=\mathbf{I}_0+\frac{\partial S}{\partial\boldsymbol\phi},\qquad S(\boldsymbol\phi)=\sum_{\mathbf{k}\neq 0}S_{\mathbf{k}}\,e^{i\mathbf{k}\cdot\boldsymbol\phi},\quad \mathbf{k}\in\mathbb{Z}^n .\]</div>
+      <p>(A graph over the torus is Lagrangian exactly when it is the graph of a closed one-form, and it has the same actions exactly when that form is exact.) So the possible errors are labelled by integer vectors \(\mathbf{k}\). The energy on the deformed torus is</p>
+      <div class="eqn">\[H=h(\mathbf{I}_0)+\boldsymbol\Omega\cdot\frac{\partial S}{\partial\boldsymbol\phi}+\frac12\,\frac{\partial S}{\partial\boldsymbol\phi}\cdot\frac{\partial\boldsymbol\Omega}{\partial\mathbf{I}}\cdot\frac{\partial S}{\partial\boldsymbol\phi}+\dots\]</div>
+      <p>and to leading order its variance, set beside the true mean-square displacement of the torus in the action \(I_j\), is</p>
+      <div class="eqn">\[\operatorname{Var}H=\sum_{\mathbf{k}}(\mathbf{k}\cdot\boldsymbol\Omega)^2\,|S_{\mathbf{k}}|^2,\qquad \big\langle\delta I_j^{\,2}\big\rangle=\sum_{\mathbf{k}}k_j^{\,2}\,|S_{\mathbf{k}}|^2 .\]</div>
+      <p>The loss weights mode \(\mathbf{k}\) by \((\mathbf{k}\cdot\boldsymbol\Omega)^2\). The actual error in that mode is weighted by \(|\mathbf{k}|^2\). The ratio is \(|\boldsymbol\Omega|^2\cos^2\) of the angle between \(\mathbf{k}\) and \(\boldsymbol\Omega\).</p>
+    </div>
+    <figure class="fig"><h3>In action space, an error along k is a smear along k, and energy only changes across the contours</h3>
+      <div class="diagram">__FIG_ACTION__</div>
+      <figcaption>The true torus is the point I₀. A deformation in mode k spreads it into a segment along the integer vector k (orange). Energy contours are perpendicular to Ω (blue). Left: the segment crosses contours, so the energy varies on the deformed torus and the loss sees it. Right: for the isochrone near its centre Ω ≈ (1, ½), so k = (1, −2) lies along a contour and the energy is unchanged to first order, while the angular momentum I₂ varies by the full length of the segment.</figcaption></figure>
+    <div class="prose">
+      <p>Three consequences.</p>
+      <ul>
+        <li><b>Small divisors.</b> Driving the energy error \(e(\boldsymbol\phi)=\sum e_{\mathbf{k}}e^{i\mathbf{k}\cdot\boldsymbol\phi}\) to zero is solving \(\boldsymbol\Omega\cdot\partial S/\partial\boldsymbol\phi=e\), the homological equation of canonical perturbation theory. Its solution \(S_{\mathbf{k}}=e_{\mathbf{k}}/(i\,\mathbf{k}\cdot\boldsymbol\Omega)\) shows the amplification: a residual energy error \(e_{\mathbf{k}}\) allows a torus error \(|\mathbf{k}|\,|e_{\mathbf{k}}|/|\mathbf{k}\cdot\boldsymbol\Omega|\).</li>
+        <li><b>At an exact resonance of one torus</b>, \(\mathbf{k}\cdot\boldsymbol\Omega(\mathbf{I}_0)=0\), the first-order term vanishes and the energy changes only at second order, by an amount of order \((\mathbf{k}\cdot\partial\boldsymbol\Omega/\partial\mathbf{I}\cdot\mathbf{k})\,|S_{\mathbf{k}}|^2\). The torus error is then of order the square root of the energy error.</li>
+        <li><b>If \(\mathbf{k}\cdot\boldsymbol\Omega\) vanishes on every torus</b>, the energy does not depend on the action combination along \(\mathbf{k}\) at all, and the mode is invisible at every order. This is not an inaccuracy: the deformed tori are equally valid invariant tori. In a spherical potential \(h=h(J_r,L)\), so \(\Omega_3=0\) and \(\mathbf{k}=(0,0,k_3)\) is such a mode.</li>
+      </ul>
+      <p>None of this is special to the energy loss. A torus deformed along a nearly resonant mode is itself nearly invariant: the motion is nearly tangent to it. Any criterion built on invariance of a single torus inherits the same conditioning (section 7).</p>
+    </div>
+    <figure class="fig"><h3>Check on exact isochrone tori: energy response against k·Ω</h3>
+      <div id="modes-legend"></div><div class="plot" id="fig-modes"></div>
+      <figcaption id="modes-cap"></figcaption></figure>
+    <div class="fig"><h3>The same check for one torus, mode by mode</h3><div class="tablewrap" id="modes-table"></div>
+      <div class="cap" id="modes-table-cap"></div></div>
+  </section>
+
+  <section>
+    <div class="eyebrow">6 · What the trained models show</div>
+    <h2>Both weaknesses appear, at the size the calculation predicts</h2>
+    <div class="prose">
+      <p><b>Near-resonance.</b> Near its centre the isochrone is a harmonic oscillator with \(\Omega_r=2\Omega_\psi\), so the mode \(\mathbf{k}=(1,-2,0)\) has \(\mathbf{k}\cdot\boldsymbol\Omega=-\Omega_r L/\sqrt{L^2+4GMb}\), which tends to zero with \(L\). That mode moves \(L\) at full strength (\(k_2=-2\)). The prediction is that \(|L|\) should wander more than the energy on low-\(L\) tori, and that this should not go away as the fit improves.</p>
+    </div>
+    <figure class="fig"><h3>|L| wander relative to the energy error, torus by torus, against distance from the 1:2 resonance</h3>
+      <div id="pt-legend"></div><div class="plot" id="fig-pt"></div>
+      <figcaption id="pt-cap"></figcaption></figure>
+    <div class="prose">
+      <p><b>Exact degeneracy.</b> For a spherical target the loss cannot tell the conventional tori, on which \(L_z\) is constant, from any other family built from the same orbits. The trained models pick a different family each time: the conventional one, rotated rigidly.</p>
+    </div>
+    <figure class="fig"><h3>A spherical target leaves the axis free, and each model picks its own</h3>
+      <div class="diagram">__FIG_SPHERE__</div>
+      <div class="tablewrap" id="tilt-table"></div>
+      <figcaption id="tilt-cap"></figcaption></figure>
+  </section>
+
+  <section>
+    <div class="eyebrow">7 · What can be added</div>
+    <h2>Other residuals, written in terms of the same function K</h2>
+    <div class="prose">
+      <p><b>The invariance residual is the gradient of K.</b> Requiring Hamilton's flow to move each point along its torus at fixed rates \(\boldsymbol\nu\) gives the residual \(X_H-\sum_i\nu_i\,\partial z/\partial\theta_i\). Because \(T\) is canonical, in the model's own coordinates this is exactly</p>
+      <div class="eqn">\[\Big(\frac{\partial K}{\partial\mathbf{J}}-\boldsymbol\nu,\;-\frac{\partial K}{\partial\boldsymbol\theta}\Big).\]</div>
+      <p>So the energy loss penalises \(K-\langle K\rangle\), and the invariance loss penalises the derivatives of the same function: along the torus, and across neighbouring tori. The derivative along the torus carries the same factor \(\mathbf{k}\cdot\boldsymbol\Omega\). The derivative across tori does not, which is why the term helps, but it is information about how the error varies from torus to torus and not a new integral. In the runs so far it lowered the wander by about 20% as a fine-tune and gave mixed results from scratch.</p>
+      <p><b>A known integral adds a direction.</b> If \(C\) is an integral whose value on the torus is known from its labels, \(C\circ T-c(\mathbf{J})\) is a residual that weights mode \(\mathbf{k}\) by \((\mathbf{k}\cdot\partial C/\partial\mathbf{I})^2\). Energy alone gives the single direction \(\boldsymbol\Omega\). With \(|L|\) and \(L_z\) in a spherical potential the directions are \(\boldsymbol\Omega\), \(\hat{\mathbf{e}}_2\) and \(\hat{\mathbf{e}}_3\), which span action space, so no mode is hidden and the axis is fixed. These residuals need only the Jacobian already computed for the energy.</p>
+    </div>
+    <div class="fig"><h3>Which integrals are available</h3><div class="tablewrap"><table>
+      <thead><tr><th>Target</th><th>Integrals known in closed form</th><th>What can be imposed</th><th>What stays weak</th></tr></thead><tbody>
+      <tr><td>Spherical (isochrone, NFW)</td><td>H and the vector L</td><td>|x × v| = L and (x × v)<sub>z</sub> = L<sub>z</sub>, pointwise</td><td>Nothing in principle: the three span action space</td></tr>
+      <tr><td>Axisymmetric (MWPotential2014)</td><td>H and L<sub>z</sub></td><td>(x × v)<sub>z</sub> = L<sub>z</sub>, pointwise. |L| is not conserved</td><td>Modes with k<sub>φ</sub> = 0 near a resonance between the radial and vertical frequencies</td></tr>
+      <tr><td>Triaxial</td><td>H only</td><td>Nothing</td><td>Every nearly resonant mode</td></tr>
+      </tbody></table></div>
+      <div class="cap">The angular-momentum residuals have not been run yet. An axisymmetric target has no rotational freedom to fix beyond a turn about the z axis, which only shifts an angle.</div></div>
+    <div class="prose">
+      <p><b>Limits of the whole argument.</b> It assumes the tori exist. A realistic potential is not exactly integrable: near low-order resonances it has islands and thin chaotic layers where no torus of the assumed shape exists, and a smooth map can only pass through them approximately. The loss is also evaluated on a finite set of angles (256 per torus here), so modes finer than that sampling are not constrained by the training set.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">8 · For the paper</div>
+    <h2>The argument as a paragraph, a proposition and two remarks</h2>
+    <div class="prose"><p>LaTeX source for the statements above, written to drop into a methods section. It uses <span class="mono">amsthm</span>-style <span class="mono">proposition</span> and <span class="mono">proof</span> environments. The references at the end are from memory and should be checked before they are cited.</p></div>
+    <button class="btn" id="copy-tex" type="button">Copy LaTeX</button>
+    <pre class="tex" id="tex" tabindex="0"></pre>
+  </section>
+</div>
+<script>
+window.MathJax = {tex: {inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']]}, svg: {fontCache: 'global'}, options: {skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']}};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg-full.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.17/dist/plot.umd.min.js"></script>
+<script>
+const DATA = __DATA__;
+const $ = s => document.querySelector(s);
+const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = v => (v == null || !isFinite(v)) ? '–' : (Math.abs(v) >= 1e-2 && Math.abs(v) < 1e4 ? (+v).toPrecision(3) : (+v).toExponential(1));
+const sup = v => { const [m, e] = (+v).toExponential(1).split('e'); return `${m}×10<sup>${+e}</sup>`; };
+const legend = items => `<div class="legend">${items.map(([c, l, kind]) => `<span><i class="${kind || ''}" style="background:${c};color:${c}"></i>${l}</span>`).join('')}</div>`;
+function base(el, o) {
+  return Object.assign({width: Math.max(280, el.clientWidth || 640), height: 320, marginLeft: 60, marginBottom: 42, marginTop: 26, marginRight: 16,
+    style: {background: 'transparent', color: tok('--ink-2'), fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: '11px'}, grid: true}, o);
+}
+const charts = [];
+const chart = (id, fn) => charts.push([id, fn]);
+function renderAll() { for (const [id, fn] of charts) { const el = document.getElementById(id); if (!el) continue; el.innerHTML = ''; const n = fn(el); if (n) el.append(n); } }
+const kStr = k => `(${k.map(x => String(x).replace('-', '−')).join(', ')})`;
+
+/* ---------- linear response on exact tori ---------- */
+(function () {
+  const M = DATA.modes.map(m => ({...m, x: Math.abs(m.kOm) / m.Om_r, y: m.dH / m.Om_r}));
+  const on = M.filter(m => m.x > 1e-9), off = M.filter(m => m.x <= 1e-9);
+  $('#modes-legend').innerHTML = legend([[tok('--s1'), 'measured: spread of H on the deformed torus, per unit displacement', 'pt'], [tok('--muted'), 'first-order prediction |k·Ω| / √2', 'dash']]);
+  chart('fig-modes', el => {
+    const xd = [d3.min(on, m => m.x) / 1.6, d3.max(on, m => m.x) * 1.6];
+    return Plot.plot(base(el, {x: {type: 'log', label: '|k·Ω| / Ω_r →', domain: xd, ticks: [0.01, 0.03, 0.1, 0.3, 1], tickFormat: d => String(d)}, y: {type: 'log', label: '↑ rms energy change per unit displacement, / Ω_r', ticks: [0.01, 0.03, 0.1, 0.3, 1], tickFormat: d => String(d)},
+      marks: [Plot.line(xd.map(x => ({x, y: x / Math.SQRT2})), {x: 'x', y: 'y', stroke: tok('--muted'), strokeDasharray: '4,4', strokeWidth: 1.5}),
+        Plot.dot(on, {x: 'x', y: 'y', r: 4.5, fill: tok('--s1'), stroke: tok('--surface'), strokeWidth: 1.5, tip: true,
+          title: m => `k = ${kStr(m.k)}, L = ${m.L}\n|k·Ω|/Ω_r = ${fmt(m.x)}\nenergy response ${fmt(m.y)} (predicted ${fmt(m.x / Math.SQRT2)})`})]}));
+  });
+  const worst = d3.max(on, m => Math.abs(m.y / (m.x / Math.SQRT2) - 1));
+  $('#modes-cap').innerHTML = `Each point is one exact isochrone torus (GM = b = 1, J<sub>r</sub> = 0.05, five values of L from 0.02 to 0.5) deformed by one mode k of a generating function, with the spread of H measured on 4,096 points. The ${on.length} points follow the prediction to within ${(100 * worst).toFixed(2)}% over ${Math.round(Math.log10(d3.max(on, m => m.x) / d3.min(on, m => m.x)))} decades. The ${off.length} cases with k·Ω = 0 exactly (k along the third angle) are off the left edge: their energy response is below ${sup(10 ** Math.ceil(Math.log10(d3.max(off, m => m.y))))}, which is round-off.`;
+  const L0 = 0.05, rows = DATA.modes.filter(m => m.L === L0);
+  $('#modes-table').innerHTML = `<table class="mathhead"><thead><tr><th>Mode k</th><th>k·Ω / Ω<sub>r</sub></th><th>Energy response, measured</th><th>Predicted, |k·Ω|/√2</th><th>|L| response, measured</th><th>Predicted, |k₂|/√2</th><th>L<sub>z</sub> response, measured</th><th>Predicted, |k₃|/√2</th></tr></thead><tbody>
+    ${rows.map(m => `<tr><td class="num">${kStr(m.k)}</td><td class="num">${(m.kOm / m.Om_r).toFixed(4).replace('-', '−')}</td><td class="num">${m.dH < 1e-9 ? '&lt; 10<sup>−9</sup>' : (m.dH).toFixed(4)}</td><td class="num">${(Math.abs(m.kOm) / Math.SQRT2).toFixed(4)}</td>
+      <td class="num">${m.dL.toFixed(3)}</td><td class="num">${(Math.abs(m.k[1]) / Math.SQRT2).toFixed(3)}</td><td class="num">${m.dLz.toFixed(3)}</td><td class="num">${(Math.abs(m.k[2]) / Math.SQRT2).toFixed(3)}</td></tr>`).join('')}</tbody></table>`;
+  const r12 = rows.find(m => m.k.join() === '1,-2,0');
+  $('#modes-table-cap').innerHTML = `The torus with L = ${L0}. Responses are the rms change of each quantity per unit displacement of the torus (energy in units where GM = b = 1). For k = (1, −2, 0) the angular momentum moves ${Math.round(r12.dL / r12.dH)} times more than the energy. For k along the third angle the energy does not move at all, and only L<sub>z</sub> does.`;
+})();
+
+/* ---------- trained models: per-torus ratio against detuning ---------- */
+(function () {
+  const P = DATA.per_torus, names = {s3_isochrone: 'first isochrone model (laptop, 200 LM steps)', depth_d16_b0_s1: '16 layers × 32, trained to its plateau', grow_w128_from_d16_b0_s1: '16 layers × 128, grown: the best so far'};
+  const col = ['--s1', '--s2', '--s3'];
+  const pts = P.flatMap((p, i) => p.energy.map((e, j) => ({m: i, x: p.detuning[j], y: p.wander[j] / e, L: p.L[j], Jr: p.Jr[j], e, w: p.wander[j]})));
+  const med = P.flatMap((p, i) => d3.rollups(pts.filter(q => q.m === i), v => d3.median(v, q => q.y), q => q.L.toPrecision(6)).map(([L, y]) => ({m: i, x: pts.find(q => q.m === i && q.L.toPrecision(6) === L).x, y}))).sort((a, b) => a.x - b.x);
+  $('#pt-legend').innerHTML = legend([...P.map((p, i) => [tok(col[i]), names[p.name] || p.name, 'pt']), [tok('--ink-2'), 'lines join the medians']]);
+  chart('fig-pt', el => Plot.plot(base(el, {height: 340,
+    x: {type: 'log', label: 'detuning |Ω_r − 2Ω_ψ| / Ω_r of the torus →', domain: [d3.min(pts, q => q.x) / 1.5, d3.max(pts, q => q.x) * 1.5], ticks: [0.01, 0.02, 0.05, 0.1, 0.2], tickFormat: d => String(d)},
+    y: {type: 'log', label: '↑ |L| wander / energy error', domain: [d3.min(pts, q => q.y) / 1.3, d3.max(pts, q => q.y) * 1.3], ticks: [1, 2, 5, 10, 20], tickFormat: d => String(d)},
+    marks: [Plot.ruleY([1], {stroke: tok('--rule-2')}),
+      Plot.dot(pts, {x: q => q.x * (1 + 0.09 * (q.m - 1)), y: 'y', r: 3, fill: q => tok(col[q.m]), fillOpacity: .45, tip: true,
+        title: q => `${names[P[q.m].name]}\nJ_r = ${fmt(q.Jr)}, L = ${fmt(q.L)}\nenergy error ${fmt(q.e)}, |L| wander ${fmt(q.w)}\nratio ${q.y.toFixed(1)}`}),
+      ...P.map((p, i) => Plot.line(med.filter(q => q.m === i), {x: q => q.x * (1 + 0.09 * (i - 1)), y: 'y', stroke: tok(col[i]), strokeWidth: 2})),
+      ...P.map((p, i) => Plot.dot(med.filter(q => q.m === i), {x: q => q.x * (1 + 0.09 * (i - 1)), y: 'y', r: 5, fill: tok(col[i]), stroke: tok('--surface'), strokeWidth: 1.5}))]})));
+  const g = (i, lo) => d3.median(pts.filter(q => q.m === i && (lo ? q.x < 0.03 : q.x > 0.1)), q => q.y);
+  const tot = i => [d3.median(P[i].energy), d3.median(P[i].wander)];
+  $('#pt-cap').innerHTML = `Each small point is one of the 64 held-out tori of a model (four values of L, so four columns; the three models are offset sideways for legibility). Vertical axis: the |L| wander of the torus, as a fraction of J<sub>r</sub> + L, divided by its relative energy error. Close to the resonance the wander is ${g(0, true).toFixed(0)}, ${g(1, true).toFixed(0)} and ${g(2, true).toFixed(0)} times the energy error in the three models; far from it, ${g(0, false).toFixed(1)}, ${g(1, false).toFixed(1)} and ${g(2, false).toFixed(1)} times. Between the first model and the best, the median energy error fell from ${sup(tot(0)[0])} to ${sup(tot(2)[0])} and the median wander from ${sup(tot(0)[1])} to ${sup(tot(2)[1])}: both improved about a hundredfold, and their ratio did not change. The ratio is set by the potential's frequencies, as section 5 predicts, not by the quality of the fit.`;
+})();
+
+/* ---------- tilt ---------- */
+(function () {
+  const R = DATA.tilt, lab = r => `16 layers × ${r.width}${r.grown ? ', grown' : ''}, seed ${r.seed}`;
+  $('#tilt-table').innerHTML = `<table><thead><tr><th>Model</th><th>Energy error</th><th>|L| wander</th><th>Tilt of the common axis from z</th><th>Tori's axes agree to</th><th>L<sub>z</sub> wander</th><th>Wander of L along the tilted axis</th><th>Its mean against the label L<sub>z</sub>, max</th></tr></thead><tbody>
+    ${R.map(r => `<tr><td>${lab(r)}</td><td class="num">${fmt(r.energy)}</td><td class="num">${fmt(r.L_wander)}</td><td class="num">${r.tilt_deg.toFixed(2)}°</td><td class="num">${r.axes_agree_deg.toFixed(2)}°</td><td class="num">${fmt(r.Lz_wander)}</td><td class="num"><b>${fmt(r.Laxis_wander)}</b></td><td class="num">${fmt(r.Laxis_offset)}</td></tr>`).join('')}</tbody></table>`;
+  const good = R.filter(r => r.tilt_deg < 30), big = R.find(r => r.tilt_deg > 30);
+  $('#tilt-cap').innerHTML = `The sketch shows where the direction of L points as the third angle goes round one torus, drawn for the largest tilt among the grown 128-wide models. Table: for each trained isochrone model, one axis is fitted to all its tori (medians over the 64 held-out tori, wanders as fractions of J<sub>r</sub> + L). The tori of a model share that axis to within ${d3.max(good, r => r.axes_agree_deg).toFixed(1)}°, so the tilt is a rotation of the whole map. Measured along it, the angular momentum is as constant as |L| is, and its mean equals the torus's L<sub>z</sub> label to ${sup(d3.max(good, r => r.Laxis_offset))} or better. The tilt ranges from ${d3.min(good, r => r.tilt_deg).toFixed(1)}° to ${d3.max(good, r => r.tilt_deg).toFixed(0)}° in these runs${big ? `, and is ${big.tilt_deg.toFixed(0)}° in the 64-wide run trained from scratch (last row)` : ''}. A grown model stays within about 2° of the tilt of the model it was grown from.`;
+})();
+
+/* ---------- LaTeX ---------- */
+const TEX = String.raw`\paragraph{Why constant energy suffices.}
+Let $T=F\circ\tau:(\boldsymbol\theta,\mathbf{J})\mapsto(\mathbf{x},\mathbf{v})$ be the composition of the toy
+action--angle map $\tau$ with a symplectic flow $F$, and write $K\equiv H\circ T$ for the target Hamiltonian in the
+model's coordinates. Since $T$ is symplectic, each image torus
+$\mathcal{T}_{\mathbf{J}}=T(\mathbb{T}^n\times\{\mathbf{J}\})$ is Lagrangian; since each layer of $F$ changes
+$\mathbf{v}\cdot d\mathbf{x}$ by an exact differential, its actions
+$(2\pi)^{-1}\oint_{\gamma_i}\mathbf{v}\cdot d\mathbf{x}$ equal $J_i$. Both hold for any value of the weights.
+The training loss is the variance of $K$ over $\boldsymbol\theta$ at fixed $\mathbf{J}$.
+
+\begin{proposition}
+(i) If $H$ is constant on a Lagrangian torus $\mathcal{T}$, then $\mathcal{T}$ is invariant under the flow of $H$.
+(ii) If $K(\boldsymbol\theta,\mathbf{J})=h(\mathbf{J})$ on an open set of actions, then
+$(\boldsymbol\theta,\mathbf{J})$ are action--angle variables of $H$ on its image, with frequencies
+$\boldsymbol\Omega=\partial h/\partial\mathbf{J}$.
+\end{proposition}
+\begin{proof}
+(i) For any $w$ tangent to $\mathcal{T}$, $\omega(X_H,w)=dH(w)=0$, so $X_H$ lies in the symplectic complement of
+$T\mathcal{T}$, which for a Lagrangian submanifold is $T\mathcal{T}$ itself.
+(ii) $T$ is canonical, so $\dot{\boldsymbol\theta}=\partial K/\partial\mathbf{J}=\partial h/\partial\mathbf{J}$ and
+$\dot{\mathbf{J}}=-\partial K/\partial\boldsymbol\theta=0$.
+\end{proof}
+
+No integral other than $H$ enters. Any further integral is constant along orbits, hence constant on every
+$\mathcal{T}_{\mathbf{J}}$ whose frequencies are rationally independent, where a single orbit is dense.
+
+\paragraph{Remark 1 (conditioning).}
+Let $(\boldsymbol\phi,\mathbf{I})$ be exact action--angle variables, $H=h(\mathbf{I})$. A Lagrangian torus near
+$\mathbf{I}=\mathbf{I}_0$ with the same actions is the graph
+$\mathbf{I}=\mathbf{I}_0+\partial S/\partial\boldsymbol\phi$ of a periodic function
+$S=\sum_{\mathbf{k}\neq0}S_{\mathbf{k}}e^{i\mathbf{k}\cdot\boldsymbol\phi}$, on which, to leading order,
+\begin{equation}
+\mathrm{Var}\,H=\sum_{\mathbf{k}}(\mathbf{k}\cdot\boldsymbol\Omega)^2|S_{\mathbf{k}}|^2 ,
+\qquad
+\langle\delta I_j^2\rangle=\sum_{\mathbf{k}}k_j^2|S_{\mathbf{k}}|^2 .
+\end{equation}
+The loss therefore weights an error in mode $\mathbf{k}$ by $(\mathbf{k}\cdot\boldsymbol\Omega)^2$ rather than
+$|\mathbf{k}|^2$: these are the small divisors of the homological equation
+$\boldsymbol\Omega\cdot\partial S/\partial\boldsymbol\phi=e$. Near a resonance a small energy error permits a torus
+error larger by $|\mathbf{k}|/|\mathbf{k}\cdot\boldsymbol\Omega|$; at an exact resonance the energy responds only at
+second order.
+
+\paragraph{Remark 2 (degeneracy).}
+If $\mathbf{k}\cdot\boldsymbol\Omega\equiv0$ for some $\mathbf{k}$, as for $\mathbf{k}=(0,0,1)$ in a spherical
+potential where $h=h(J_r,L)$, the corresponding deformations are invariant tori with the same actions and the same
+energies, and the loss cannot distinguish them. In practice the learned map for a spherical target is the
+conventional one composed with a rigid rotation. A known integral $C$ with $C=c(\mathbf{J})$ on the tori can be
+added as a residual $C\circ T-c(\mathbf{J})$, which weights mode $\mathbf{k}$ by
+$(\mathbf{k}\cdot\partial C/\partial\mathbf{I})^2$; $|\mathbf{L}|$ and $L_z$ together with $H$ leave no mode
+unweighted in a spherical potential, and $L_z$ is available in an axisymmetric one.
+
+% References to check before citing (from memory):
+% Arnold, Mathematical Methods of Classical Mechanics (Lagrangian submanifolds; Liouville--Arnold theorem)
+% Binney & Tremaine 2008, Galactic Dynamics, sec. 3.5--3.6 (actions, angles, torus mapping)
+% McGill & Binney 1990, MNRAS 244, 634 (torus construction by minimising the energy variance)
+% Kaasalainen & Binney 1994, MNRAS 268, 1033 (orbit families; resonances)
+% Binney & McMillan 2016, MNRAS 456, 1982 (the Torus Mapper code)
+`;
+$('#tex').textContent = TEX;
+$('#copy-tex').addEventListener('click', async e => {
+  const b = e.currentTarget;
+  try { await navigator.clipboard.writeText(TEX); b.textContent = 'Copied'; }
+  catch (err) { const r = document.createRange(); r.selectNodeContents($('#tex')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = 'Selected: press copy'; }
+  setTimeout(() => { b.textContent = 'Copy LaTeX'; }, 2200);
+});
+
+renderAll();
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
+new MutationObserver(renderAll).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+</script>

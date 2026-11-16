@@ -175,3 +175,13 @@ Checks (`check_halo.py`, re-run by `report/make_data.py`):
 `MWPotential2014` is written directly in torch. galpy's torch backend was chosen earlier as the definition of the 3D Milky Way target; as of the 2.0.0b1 pre-release (`pip install --pre galpy`, in `~/.venvs/galpy-2b1` on the laptop) it agrees with the native one to round-off, where the earlier development build was 1e-8 off in the bulge. `{"kind": "mw2014", "backend": "galpy"}` calls it instead. Its bulge has no forward-mode derivative, so `vmap(hessian)` fails on it; that only matters for LM with the invariance term (β > 0).
 
 Runs: stage 1 submitted to H100s on 16 Nov (jobs 1344003–06).
+
+## Theory note: why constant energy is enough (16 Nov)
+
+`report/note.html` (built by `report/make_note_data.py` then `report/build_note.py` into `report/why_energy_suffices.html`) holds the argument and its checks, with LaTeX for the paper.
+
+- Every image torus is Lagrangian with actions J by construction. A Lagrangian torus on which H is constant is invariant, and if K = H∘T depends on J alone the model's (θ, J) are action-angle variables. No other integral is needed.
+- Conditioning: a nearby Lagrangian torus with the same actions is I = I₀ + ∂S/∂φ, and Var H = Σ (k·Ω)² |S_k|² while the action I_j moves by Σ k_j² |S_k|². Checked on exact isochrone tori to 0.02%.
+- Trained models: per torus, |L| wander is about 13 times the energy error near the 1:−2 resonance of the isochrone's core and about 2 times far from it, in the first model and in the best one alike. Both fell about a hundredfold between them (median energy error 4.6e-4 → 3.5e-6, median wander 2.7e-3 → 2.4e-5); their ratio did not change.
+- Degeneracy: each trained isochrone model is the conventional map composed with a rigid rotation (0.2°–11°, 112° in `width_w64_b0_s0`). L_z wanders by up to 9e-2, but the component of L along the model's own axis is as constant as |L| and matches the L_z label to 3e-5 or better.
+- The invariance residual equals (∂K/∂J − ν, −∂K/∂θ) in the model's coordinates: derivatives of the same function. A known integral C adds a residual weighted by (k·∂C/∂I)²: |L| and L_z for spherical targets, L_z for axisymmetric ones. Not run yet.
